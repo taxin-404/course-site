@@ -10,7 +10,7 @@ import { Admin } from './admin';
   template: `
     @if (api.me(); as me) {
       <header>
-        <h2>Course</h2>
+        <h2 class="logo">Course</h2>
         <div>
           @if (me.is_admin) {
             <button (click)="admin.set(!admin())">{{ admin() ? 'Back to course' : 'Admin panel' }}</button>
