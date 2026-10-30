@@ -7,37 +7,44 @@ import { Api, AdminUser } from './api';
   imports: [FormsModule],
   template: `
     <main class="admin">
-      <h1>Admin panel</h1>
+      <div class="ah">
+        <div>
+          <h1>Admin panel</h1>
+          <p class="sub">{{ users().length }} users · {{ admins() }} admin{{ admins() === 1 ? '' : 's' }}</p>
+        </div>
+      </div>
 
-      <form class="card" (ngSubmit)="add()">
+      <section class="ac">
         <h3>Add user</h3>
-        <input name="email" type="email" placeholder="Email" [(ngModel)]="email" required />
-        <input name="password" type="text" placeholder="Temporary password (8+ characters)" minlength="8" [(ngModel)]="password" required />
-        <label class="chk"><input name="isAdmin" type="checkbox" [(ngModel)]="isAdmin" /> Make admin</label>
-        <button class="p">Add user</button>
-      </form>
+        <form class="af" (ngSubmit)="add()">
+          <input name="email" type="email" placeholder="Email" autocomplete="off" [(ngModel)]="email" required />
+          <input name="password" type="text" placeholder="Temporary password (8+ chars)" autocomplete="off" minlength="8" [(ngModel)]="password" required />
+          <label class="chk"><input name="isAdmin" type="checkbox" [(ngModel)]="isAdmin" /><span>Admin</span></label>
+          <button class="p">Add user</button>
+        </form>
+        @if (message()) { <p class="msg" role="status" [class.bad]="isError()">{{ message() }}</p> }
+      </section>
 
-      <p class="msg" role="status">{{ message() }}</p>
-
-      <table class="card">
-        <thead><tr><th>Email</th><th>Role</th><th>Lessons done</th><th></th></tr></thead>
-        <tbody>
-          @for (u of users(); track u.id) {
-            <tr>
-              <td>{{ u.email }}</td>
-              <td>{{ u.owner ? 'Owner' : u.is_admin ? 'Admin' : 'Student' }}</td>
-              <td>{{ u.watched }}</td>
-              <td class="acts">
-                <button type="button" (click)="reset(u)">Reset password</button>
-                @if (!u.owner && u.id !== api.me()?.id) {
-                  <button type="button" (click)="toggle(u)">{{ u.is_admin ? 'Remove admin' : 'Make admin' }}</button>
-                  <button type="button" (click)="remove(u)">Delete</button>
-                }
-              </td>
-            </tr>
-          }
-        </tbody>
-      </table>
+      <section class="ac list">
+        <h3>Users</h3>
+        @for (u of users(); track u.id) {
+          <div class="row">
+            <span class="av">{{ u.email.charAt(0).toUpperCase() }}</span>
+            <div class="who">
+              <strong>{{ u.email }}</strong>
+              <small>{{ u.watched }} lesson{{ u.watched === 1 ? '' : 's' }} done</small>
+            </div>
+            <span class="badge" [class.adm]="u.is_admin">{{ u.owner ? 'Owner' : u.is_admin ? 'Admin' : 'Student' }}</span>
+            <div class="acts">
+              <button type="button" (click)="reset(u)">Reset password</button>
+              @if (!u.owner && u.id !== api.me()?.id) {
+                <button type="button" (click)="toggle(u)">{{ u.is_admin ? 'Remove admin' : 'Make admin' }}</button>
+                <button type="button" class="d" (click)="remove(u)">Delete</button>
+              }
+            </div>
+          </div>
+        }
+      </section>
     </main>
   `,
 })
@@ -45,6 +52,8 @@ export class Admin implements OnInit {
   protected readonly api = inject(Api);
   protected readonly users = signal<AdminUser[]>([]);
   protected readonly message = signal('');
+  protected readonly isError = signal(false);
+  protected admins = () => this.users().filter((u) => u.is_admin).length;
   protected email = '';
   protected password = '';
   protected isAdmin = false;
@@ -56,12 +65,12 @@ export class Admin implements OnInit {
   }
 
   private async run(fn: () => Promise<unknown>, ok: string): Promise<void> {
-    try { await fn(); this.message.set(ok); await this.load(); } catch (e) { this.message.set((e as Error).message); }
+    try { await fn(); this.isError.set(false); this.message.set(ok); await this.load(); } catch (e) { this.isError.set(true); this.message.set((e as Error).message); }
   }
 
   protected async add(): Promise<void> {
     await this.run(() => this.api.addUser(this.email, this.password, this.isAdmin), 'User added');
-    if (this.message() === 'User added') { this.email = ''; this.password = ''; this.isAdmin = false; }
+    if (!this.isError()) { this.email = ''; this.password = ''; this.isAdmin = false; }
   }
 
   protected async reset(u: AdminUser): Promise<void> {
