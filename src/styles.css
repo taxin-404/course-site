@@ -67,10 +67,6 @@ main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1.2rem 1.5rem;g
 video::-webkit-media-controls-fullscreen-button{display:none}
 .wm{position:absolute;pointer-events:none;user-select:none;color:rgba(255,255,255,.35);font-size:14px;text-shadow:0 0 3px rgba(0,0,0,.6);transition:all 1s}
 
-/* PDF viewer */
-.epdf-wrap { height: 100%; }
-
-
 /* Dialog */
 dialog{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);width:min(440px,92vw)}
 dialog form{display:grid;gap:.6rem;margin-bottom:1rem}

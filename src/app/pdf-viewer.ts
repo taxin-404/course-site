@@ -26,10 +26,9 @@ import { Api } from './api';
       [contextMenuAllowed]="false"
       [enablePrint]="false"
       [zoom]="'page-width'"
-      height="100%"
     ></ngx-extended-pdf-viewer>
   `,
-  styles: [`:host { display: flex; flex-direction: column; flex: 1; min-height: 0; }`],
+  styles: [],
 })
 export class PdfViewer {
   private readonly api = inject(Api);
