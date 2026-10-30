@@ -69,7 +69,7 @@ main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1.2rem 1.5rem;g
 .empty{color:var(--mute);padding:.5rem 0}
 .vw{position:relative;background:#000;border-radius:8px;overflow:hidden}
 .vw video{display:block;width:100%;aspect-ratio:16/9}
-.vw .fsb{position:absolute;right:6px;bottom:4px;width:40px;height:40px;padding:0;display:grid;place-items:center;border:0;border-radius:50%;background:transparent;color:#fff;opacity:0;transition:opacity .2s}
+.vw .fsb{position:absolute;right:30px;bottom:30px;width:34px;height:34px;padding:0;display:grid;place-items:center;border:0;border-radius:50%;background:transparent;color:#fff;opacity:0;transition:opacity .2s}
 .vw:hover .fsb,.vw .fsb:focus-visible{opacity:1}
 .vw .fsb:hover{background:rgba(255,255,255,.18)}
 .vw:fullscreen video{height:100%;aspect-ratio:auto}
