@@ -4,10 +4,10 @@
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
 h1,h2,h3{font-family:"Iowan Old Style",Georgia,serif;margin:0}
 button,input{font:inherit;color:inherit}
-button{cursor:pointer;border:1px solid var(--line);background:var(--panel);padding:.5rem .9rem;border-radius:6px}
+button:not(ngx-extended-pdf-viewer *){cursor:pointer;border:1px solid var(--line);background:var(--panel);padding:.5rem .9rem;border-radius:6px}
 button.p{background:var(--acc);border-color:var(--acc);color:#fff}
 button:disabled{opacity:.6;cursor:wait}
-input{width:100%;padding:.55rem .7rem;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+input:not(ngx-extended-pdf-viewer *){width:100%;padding:.55rem .7rem;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 
 /* Login */
