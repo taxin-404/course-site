@@ -1,4 +1,4 @@
-import { Component, DestroyRef, ElementRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { Api } from './api';
 
 @Component({
@@ -23,7 +23,6 @@ export class PdfViewer {
   protected readonly status = signal('');
   protected readonly scale = signal(1.4);
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
-  private readonly email = computed(() => this.api.me()?.email ?? '');
   private run = 0;
 
   constructor() {
@@ -33,7 +32,6 @@ export class PdfViewer {
       if (el) untracked(() => this.render(key, el));
     });
     effect(() => {
-      // re-render when scale changes
       this.scale();
       const key = this.key();
       const el = this.box()?.nativeElement;
@@ -67,23 +65,9 @@ export class PdfViewer {
         box.append(canvas);
         const ctx = canvas.getContext('2d')!;
         await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
-        if (run !== this.run) return;
-        this.stamp(ctx, vp.width, vp.height);
       }
     } catch {
       if (run === this.run) this.status.set('Could not load PDF.');
     }
-  }
-
-  private stamp(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-    ctx.save();
-    ctx.globalAlpha = 0.1;
-    ctx.fillStyle = '#000';
-    ctx.font = '24px sans-serif';
-    ctx.rotate(-Math.PI / 6);
-    for (let y = 0; y < w / 2 + h; y += 180) {
-      for (let x = -h / 2; x < w; x += 420) ctx.fillText(this.email(), x, y);
-    }
-    ctx.restore();
   }
 }
