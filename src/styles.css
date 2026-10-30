@@ -1,4 +1,4 @@
-@font-face{font-family:"Curse of the Zombie";src:url(/fonts/curse-of-the-zombie.ttf) format("truetype");font-display:swap}
+@font-face{font-family:"Curse of the Zombie";src:url("./curse-of-the-zombie.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap}
 :root{--bg:#eef2f6;--panel:#fff;--ink:#14202e;--mute:#5d6b7c;--line:#d5dde7;--acc:#2447d6;--ok:#1f8a5b;--bad:#c0392b}
 @media(prefers-color-scheme:dark){:root{--bg:#0f1620;--panel:#17212e;--ink:#e6edf5;--mute:#93a1b3;--line:#2a3646;--acc:#7b97ff;--ok:#4cc58d;--bad:#ff7b6b}}
 *{box-sizing:border-box}
@@ -114,4 +114,4 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
 }
 
 /* Logo */
-.logo{font-family:"Curse of the Zombie",Georgia,serif!important;font-weight:400;font-size:1.9rem;line-height:1;letter-spacing:.03em;color:var(--ink)}
+.logo{font-family:"Curse of the Zombie",Georgia,serif!important;font-weight:400!important;font-synthesis:none;font-size:1.9rem;line-height:1;letter-spacing:.03em;color:var(--ink)}
