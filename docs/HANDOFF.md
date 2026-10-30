@@ -191,3 +191,58 @@ curl -b jar -H "Range: bytes=0-99" "localhost:8787/api/media/01%20Basics/Notes.p
 ## 9. Prompt to give another AI
 
 > Read `docs/HANDOFF.md` and `README.md` first, then review the code in `worker/index.js` and `src/app/`. Do not change the platform (Cloudflare Workers, R2, D1) or the Git-based deploy flow. Start with section 6 of the handoff, items 1 to 4. For every change, explain what you changed and why, keep the Worker API and the Angular `Api` service consistent, and tell me anything you could not verify.
+
+## 10. Uploading course videos to R2
+
+### Bucket name
+`course-sourse`
+
+### R2 structure
+- Top-level folder = Course name (shown in sidebar)
+- Sub-folder inside course = Section (shown as a labeled group)
+- Files at any level = Lessons
+
+Examples:
+```
+Python Basics/intro.mp4                        → course "Python Basics", lesson "intro"
+Python Basics/Chapter 1/variables.mp4          → course "Python Basics", section "Chapter 1", lesson "variables"
+Another Course/lesson1.mp4                     → separate course "Another Course"
+```
+
+### Upload large files (300MB+) with rclone
+
+The Cloudflare dashboard and Wrangler both have a 300MB upload limit. Use rclone for larger files.
+
+Configure rclone (one time):
+```bash
+rclone config update r2 \
+  access_key_id=<R2_ACCESS_KEY_ID> \
+  secret_access_key=<R2_SECRET_ACCESS_KEY> \
+  endpoint=https://<ACCOUNT_ID>.r2.cloudflarestorage.com \
+  provider=Cloudflare \
+  no_check_bucket=true
+```
+
+Upload a file:
+```bash
+rclone copy "/path/to/video.mp4" r2:course-sourse/CourseName/ --progress
+```
+
+### Fix mp4 files before uploading (required)
+
+Raw or screen-recorded mp4s usually have their `moov` atom (metadata) at the end of the file. The browser cannot start streaming until it downloads the entire file. Fix this before uploading:
+
+```bash
+ffmpeg -i input.mp4 -c copy -movflags +faststart output.mp4
+```
+
+This does not re-encode — it only moves the metadata to the front. Takes ~30 seconds even for large files.
+
+Fix all mp4s in a folder at once:
+```bash
+for f in /path/to/course/*.mp4; do
+  ffmpeg -i "$f" -c copy -movflags +faststart "${f%.mp4}_fixed.mp4"
+done
+```
+
+Always upload the `_fixed` version to R2.
