@@ -25,7 +25,7 @@ import { Api } from './api';
       [showPropertiesButton]="false"
       [contextMenuAllowed]="false"
       [enablePrint]="false"
-      [zoom]="'page-width'"
+      [zoom]="'page-actual'"
     ></ngx-extended-pdf-viewer>
   `,
   styles: [],
