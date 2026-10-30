@@ -117,4 +117,4 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
 }
 
 /* Logo */
-.logo{font-family:"Curse of the Zombie",Georgia,serif!important;font-weight:400!important;font-synthesis:none;font-size:1.9rem;line-height:1;letter-spacing:.03em;color:var(--ink)}
+.logo{text-transform:uppercase;font-family:"Curse of the Zombie",Georgia,serif!important;font-weight:400!important;font-synthesis:none;font-size:1.9rem;line-height:1;letter-spacing:.03em;color:var(--ink)}
