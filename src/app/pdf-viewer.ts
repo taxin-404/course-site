@@ -26,12 +26,14 @@ import { Api } from './api';
       [contextMenuAllowed]="false"
       [enablePrint]="false"
       [zoom]="'page-actual'"
+      [theme]="theme"
     ></ngx-extended-pdf-viewer>
   `,
   styles: [],
 })
 export class PdfViewer {
   private readonly api = inject(Api);
+  protected readonly theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   readonly key = input.required<string>();
   protected readonly url = computed(() => this.api.mediaUrl(this.key()));
 }
