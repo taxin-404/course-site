@@ -41,10 +41,11 @@ const SCHEMA = [
 let ready;
 const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).catch((e) => { ready = null; throw e; }));
 
-// The course structure comes from the bucket: folders = sections, lessons = HLS folders (index.m3u8)
+// The course structure comes from the bucket: folders = sections, files = lessons
 let cache = { at: 0, data: null };
 const NUM = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-const mp4Ok = (env, key) => env.ALLOW_MP4 === '1' && /\.(mp4|webm)$/i.test(key);
+const VIDEO_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|m3u8)$/i;
+const MEDIA_TYPES = { m3u8: 'application/vnd.apple.mpegurl', ts: 'video/mp2t', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', m4v: 'video/mp4' };
 async function listCourse(env) {
   if (cache.data && Date.now() - cache.at < 60000) return cache.data;
   const keys = []; let cursor;
@@ -54,10 +55,13 @@ async function listCourse(env) {
   } while (cursor);
   const secs = new Map();
   for (const key of keys) {
-    const hls = key.endsWith('.m3u8'), pdf = /\.pdf$/i.test(key);
-    if (!hls && !pdf && !mp4Ok(env, key)) continue;
+    const pdf = /\.pdf$/i.test(key), video = VIDEO_EXT.test(key);
+    if (!pdf && !video) continue;
+    // For HLS: skip segment files (.ts), only list the playlist
+    if (/\.ts$/i.test(key)) continue;
     const parts = key.split('/'); const file = parts.pop();
-    const title = hls ? parts.pop() || 'Lesson' : file.replace(/\.[^.]+$/, '');
+    // For HLS folders (index.m3u8), use the parent folder as the title
+    const title = (key.endsWith('.m3u8') && file === 'index.m3u8') ? (parts.pop() || 'Lesson') : file.replace(/\.[^.]+$/, '');
     const section = parts.join(' / ') || 'Lessons';
     if (!secs.has(section)) secs.set(section, []);
     secs.get(section).push({ id: key, title, kind: pdf ? 'pdf' : 'video' });
@@ -68,13 +72,12 @@ async function listCourse(env) {
 }
 
 async function serve(req, env, key) {
-  const ok = /\.(m3u8|ts|pdf)$/i.test(key) || mp4Ok(env, key);
+  const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v)$/i.test(key);
   if (!ok || req.headers.get('sec-fetch-dest') === 'document') return json({ error: 'Not allowed' }, 403);
   const obj = await env.VIDEOS.get(key, { range: req.headers });
   if (!obj) return json({ error: 'File not found' }, 404);
-  const types = { m3u8: 'application/vnd.apple.mpegurl', ts: 'video/mp2t', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm' };
   const h = new Headers();
-  h.set('content-type', types[key.split('.').pop().toLowerCase()]);
+  h.set('content-type', MEDIA_TYPES[key.split('.').pop().toLowerCase()] || 'application/octet-stream');
   h.set('accept-ranges', 'bytes');
   h.set('cache-control', 'private, no-store');
   h.set('x-content-type-options', 'nosniff');
