@@ -41,11 +41,14 @@ const SCHEMA = [
 let ready;
 const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).catch((e) => { ready = null; throw e; }));
 
-// The course structure comes from the bucket: folders = sections, files = lessons
-let cache = { at: 0, data: null };
-const NUM = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+// Bucket structure:
+//   <Course>/<file>                  → course with a flat lesson
+//   <Course>/<Section>/<file>        → course with a section containing a lesson
+//   <Course>/<Section>/<Sub>/...     → deeper sub-folders treated as nested sections
 const VIDEO_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|m3u8)$/i;
 const MEDIA_TYPES = { m3u8: 'application/vnd.apple.mpegurl', ts: 'video/mp2t', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', m4v: 'video/mp4' };
+let cache = { at: 0, data: null };
+const NUM = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 async function listCourse(env) {
   if (cache.data && Date.now() - cache.at < 60000) return cache.data;
   const keys = []; let cursor;
@@ -53,20 +56,35 @@ async function listCourse(env) {
     const r = await env.VIDEOS.list({ cursor, limit: 1000 });
     keys.push(...r.objects.map((o) => o.key)); cursor = r.truncated ? r.cursor : undefined;
   } while (cursor);
-  const secs = new Map();
+
+  // courses: Map<courseName, Map<sectionName, lesson[]>>
+  // files directly under course root go into section '' (no section)
+  const courses = new Map();
   for (const key of keys) {
+    if (/\.ts$/i.test(key)) continue; // skip HLS segments
     const pdf = /\.pdf$/i.test(key), video = VIDEO_EXT.test(key);
     if (!pdf && !video) continue;
-    // For HLS: skip segment files (.ts), only list the playlist
-    if (/\.ts$/i.test(key)) continue;
-    const parts = key.split('/'); const file = parts.pop();
-    // For HLS folders (index.m3u8), use the parent folder as the title
-    const title = (key.endsWith('.m3u8') && file === 'index.m3u8') ? (parts.pop() || 'Lesson') : file.replace(/\.[^.]+$/, '');
-    const section = parts.join(' / ') || 'Lessons';
-    if (!secs.has(section)) secs.set(section, []);
-    secs.get(section).push({ id: key, title, kind: pdf ? 'pdf' : 'video' });
+    const parts = key.split('/');
+    if (parts.length < 2) continue; // skip root-level files with no course folder
+    const courseName = parts[0];
+    const file = parts[parts.length - 1];
+    // section = everything between course and filename joined, or '' if file is directly in course
+    const sectionName = parts.slice(1, -1).join(' / ');
+    // For HLS: index.m3u8 title comes from its immediate parent folder
+    const title = (file === 'index.m3u8') ? (parts[parts.length - 2] || file) : file.replace(/\.[^.]+$/, '');
+    if (!courses.has(courseName)) courses.set(courseName, new Map());
+    const secs = courses.get(courseName);
+    if (!secs.has(sectionName)) secs.set(sectionName, []);
+    secs.get(sectionName).push({ id: key, title, kind: pdf ? 'pdf' : 'video' });
   }
-  const data = [...secs].sort((a, b) => NUM.compare(a[0], b[0])).map(([title, lessons]) => ({ title, lessons: lessons.sort((a, b) => NUM.compare(a.title, b.title)) }));
+
+  const data = [...courses].sort((a, b) => NUM.compare(a[0], b[0])).map(([courseName, secs]) => {
+    const sections = [...secs].sort((a, b) => NUM.compare(a[0], b[0])).map(([sectionName, lessons]) => ({
+      title: sectionName || null,
+      lessons: lessons.sort((a, b) => NUM.compare(a.title, b.title)),
+    }));
+    return { title: courseName, sections };
+  });
   cache = { at: Date.now(), data };
   return data;
 }
@@ -119,7 +137,13 @@ export default {
       if (path === '/api/me') return json(u);
       if (path === '/api/course') {
         const w = new Set((await env.DB.prepare('SELECT lesson FROM watched WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.lesson));
-        return json((await listCourse(env)).map((s) => ({ title: s.title, lessons: s.lessons.map((l) => ({ ...l, done: w.has(l.id) })) })));
+        return json((await listCourse(env)).map((c) => ({
+          title: c.title,
+          sections: c.sections.map((s) => ({
+            title: s.title,
+            lessons: s.lessons.map((l) => ({ ...l, done: w.has(l.id) })),
+          })),
+        })));
       }
       if (path.startsWith('/api/media/')) return serve(req, env, decodeURIComponent(path.slice(11)));
       if (path === '/api/progress' && m === 'POST') {

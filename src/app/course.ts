@@ -1,5 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
-import { Api, Lesson, Section } from './api';
+import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
 import { PdfViewer } from './pdf-viewer';
 
@@ -9,19 +9,24 @@ import { PdfViewer } from './pdf-viewer';
   template: `
     <div class="layout">
       <nav>
-        @for (s of api.course(); track s.title) {
+        @for (c of api.courses(); track c.title) {
           <details [open]="$first">
-            <summary>{{ s.title }} ({{ done(s) }}/{{ s.lessons.length }})</summary>
-            <div class="bar"><i [style.width.%]="percent(s)"></i></div>
-            @for (l of s.lessons; track l.id) {
-              <button class="les" [class.on]="l.id === currentId()" (click)="currentId.set(l.id)">
-                <span class="ck">{{ l.done ? '✓' : '' }}</span>
-                <span class="t">{{ l.title }}{{ l.kind === 'pdf' ? ' (PDF)' : '' }}</span>
-              </button>
+            <summary>{{ c.title }} ({{ courseDone(c) }}/{{ courseTotal(c) }})</summary>
+            <div class="bar"><i [style.width.%]="coursePercent(c)"></i></div>
+            @for (s of c.sections; track s.title) {
+              @if (s.title) {
+                <div class="sec-label">{{ s.title }}</div>
+              }
+              @for (l of s.lessons; track l.id) {
+                <button class="les" [class.on]="l.id === currentId()" (click)="currentId.set(l.id)">
+                  <span class="ck">{{ l.done ? '✓' : '' }}</span>
+                  <span class="t">{{ l.title }}{{ l.kind === 'pdf' ? ' (PDF)' : '' }}</span>
+                </button>
+              }
             }
           </details>
         } @empty {
-          <p class="empty">No lessons yet. Upload HLS folders or PDFs to the bucket.</p>
+          <p class="empty">No lessons yet. Upload videos or PDFs to the bucket.</p>
         }
       </nav>
       <main>
@@ -46,10 +51,11 @@ export class Course {
   protected readonly api = inject(Api);
   protected readonly currentId = signal<string | null>(null);
   protected readonly lesson = computed<Lesson | undefined>(() =>
-    this.api.course().flatMap((s) => s.lessons).find((l) => l.id === this.currentId()));
+    this.api.courses().flatMap((c) => c.sections).flatMap((s) => s.lessons).find((l) => l.id === this.currentId()));
 
-  protected done(s: Section): number { return s.lessons.filter((l) => l.done).length; }
-  protected percent(s: Section): number { return (this.done(s) / s.lessons.length) * 100; }
+  protected courseTotal(c: CourseData): number { return c.sections.reduce((n, s) => n + s.lessons.length, 0); }
+  protected courseDone(c: CourseData): number { return c.sections.reduce((n, s) => n + s.lessons.filter((l) => l.done).length, 0); }
+  protected coursePercent(c: CourseData): number { const t = this.courseTotal(c); return t ? (this.courseDone(c) / t) * 100 : 0; }
   protected toggle(l: Lesson): void { void this.api.setDone(l.id, !l.done); }
   protected finish(l: Lesson): void { if (!l.done) this.toggle(l); }
 }

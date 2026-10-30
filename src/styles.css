@@ -23,6 +23,7 @@ nav summary{cursor:pointer;font-weight:600;padding:.4rem 0}
 .les{display:flex;gap:.5rem;width:100%;text-align:left;border:0;border-left:3px solid transparent;border-radius:0;padding:.45rem .6rem;background:none}
 .les.on{border-left-color:var(--acc);background:var(--bg)}
 .les .t{flex:1}.les .ck{color:var(--ok);width:1.1em}
+.sec-label{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--mute);padding:.6rem .6rem .2rem;margin-top:.4rem}
 main{padding:1.5rem;max-width:960px;width:100%}
 .row{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-top:1rem}
 .tools{margin-top:.6rem}
