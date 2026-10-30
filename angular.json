@@ -49,9 +49,9 @@
                 "input": "public"
               },
               {
-                "glob": "pdfium.wasm",
-                "input": "node_modules/@embedpdf/snippet/dist",
-                "output": "/"
+                "glob": "**/*",
+                "input": "node_modules/ngx-extended-pdf-viewer/assets/",
+                "output": "/assets/"
               }
             ],
             "styles": [
