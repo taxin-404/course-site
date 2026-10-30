@@ -32,15 +32,17 @@ type View =
 
           <!-- Breadcrumb (browser mode only) -->
           @if (v.kind === 'browser') {
-            <nav class="breadcrumb">
+            <div class="breadcrumb" role="navigation" aria-label="Location">
+              <span class="bc-sep">./</span>
               <button class="bc-btn" (click)="view.set(null)">Courses</button>
-              <span class="bc-sep">›</span>
+              <span class="bc-sep">/</span>
               <button class="bc-btn" (click)="goToBreadcrumb(-1)">{{ v.courseTitle }}</button>
+              <span class="bc-sep">/</span>
               @for (seg of v.path; track $index; let i = $index) {
-                <span class="bc-sep">›</span>
                 <button class="bc-btn" (click)="goToBreadcrumb(i)">{{ seg }}</button>
+                <span class="bc-sep">/</span>
               }
-            </nav>
+            </div>
           }
 
           <!-- File browser -->
