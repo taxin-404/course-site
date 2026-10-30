@@ -30,23 +30,18 @@ type View =
       <main>
         @if (view(); as v) {
 
-          <!-- Breadcrumb -->
-          <nav class="breadcrumb">
-            <button class="bc-btn" (click)="view.set(null)">Courses</button>
-            @if (v.kind === 'browser') {
+          <!-- Breadcrumb (browser mode only) -->
+          @if (v.kind === 'browser') {
+            <nav class="breadcrumb">
+              <button class="bc-btn" (click)="view.set(null)">Courses</button>
               <span class="bc-sep">›</span>
               <button class="bc-btn" (click)="goToBreadcrumb(-1)">{{ v.courseTitle }}</button>
               @for (seg of v.path; track $index; let i = $index) {
                 <span class="bc-sep">›</span>
                 <button class="bc-btn" (click)="goToBreadcrumb(i)">{{ seg }}</button>
               }
-            } @else {
-              <span class="bc-sep">›</span>
-              <button class="bc-btn" (click)="backToBrowser()">{{ activeCourse()?.title }}</button>
-              <span class="bc-sep">›</span>
-              <span class="bc-cur">{{ v.lesson.title }}</span>
-            }
-          </nav>
+            </nav>
+          }
 
           <!-- File browser -->
           @if (v.kind === 'browser') {
@@ -67,16 +62,19 @@ type View =
 
           <!-- Player / PDF viewer -->
           @if (v.kind === 'player') {
-            @if (v.lesson.kind === 'pdf') {
-              <app-pdf-viewer [key]="v.lesson.id" />
-            } @else {
-              <app-player [key]="v.lesson.id" (ended)="finish(v.lesson)" />
-            }
-            <div class="row">
-              <h2>{{ v.lesson.title }}</h2>
+            <div class="player-bar">
+              <button class="bc-btn back-btn" (click)="backToBrowser()">← Back</button>
+              <span class="player-title">{{ v.lesson.title }}</span>
               <button [class.p]="!v.lesson.done" (click)="toggle(v.lesson)">
                 {{ v.lesson.done ? 'Completed ✓' : 'Mark as complete' }}
               </button>
+            </div>
+            <div class="player-body">
+              @if (v.lesson.kind === 'pdf') {
+                <app-pdf-viewer [key]="v.lesson.id" />
+              } @else {
+                <app-player [key]="v.lesson.id" (ended)="finish(v.lesson)" />
+              }
             </div>
           }
 
