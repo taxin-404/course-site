@@ -97,7 +97,7 @@ async function serve(req, env, key) {
   const h = new Headers();
   h.set('content-type', MEDIA_TYPES[key.split('.').pop().toLowerCase()] || 'application/octet-stream');
   h.set('accept-ranges', 'bytes');
-  h.set('cache-control', 'private, no-store');
+  h.set('cache-control', /\.pdf$/i.test(key) ? 'private, max-age=3600' : 'private, no-store');
   h.set('x-content-type-options', 'nosniff');
   h.set('content-disposition', 'inline');
   let status = 200;
