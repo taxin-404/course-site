@@ -44,14 +44,20 @@ export class Api {
   }
 
   async setDone(id: string, done: boolean): Promise<void> {
-    await this.req('progress', { lesson: id, done });
-    this.courses.update((courses) => courses.map((c) => ({
+    const apply = (value: boolean) => this.courses.update((courses) => courses.map((c) => ({
       ...c,
       sections: c.sections.map((s) => ({
         ...s,
-        lessons: s.lessons.map((l) => (l.id === id ? { ...l, done } : l)),
+        lessons: s.lessons.map((l) => (l.id === id ? { ...l, done: value } : l)),
       })),
     })));
+    apply(done); // optimistic: update the UI first
+    try {
+      await this.req('progress', { lesson: id, done });
+    } catch (e) {
+      apply(!done); // roll back if the server rejected it
+      throw e;
+    }
   }
 
   listUsers(): Promise<AdminUser[]> { return this.req<AdminUser[]>('admin/users'); }
