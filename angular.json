@@ -49,9 +49,9 @@
                 "input": "public"
               },
               {
-                "glob": "pdf.worker.min.mjs",
-                "input": "node_modules/pdfjs-dist/build",
-                "output": "/pdf"
+                "glob": "pdfium.wasm",
+                "input": "node_modules/@embedpdf/snippet/dist",
+                "output": "/"
               }
             ],
             "styles": [
