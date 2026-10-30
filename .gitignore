@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+out-tsc/
+.angular/
+
+# wrangler / Cloudflare local state and secrets
+.wrangler/
+.dev.vars
+
+# course media (uploaded with rclone, never through git)
+videos/
+hls/
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.pdf
+
+# editor / OS noise
+.DS_Store
+.vscode/
+.idea/
