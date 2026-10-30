@@ -56,7 +56,7 @@ export class Player {
       }
     } else {
       el.src = url;
+      el.load();
     }
-    el.play().catch(() => {});
   }
 }
