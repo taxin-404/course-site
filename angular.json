@@ -49,9 +49,9 @@
                 "input": "public"
               },
               {
-                "glob": "**/*",
-                "input": "node_modules/ngx-extended-pdf-viewer/assets/",
-                "output": "/assets/"
+                "glob": "pdf.worker.min.mjs",
+                "input": "node_modules/pdfjs-dist/build",
+                "output": "/pdf"
               }
             ],
             "styles": [
