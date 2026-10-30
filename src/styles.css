@@ -10,6 +10,11 @@ button:disabled{opacity:.6;cursor:wait}
 input:not(ngx-extended-pdf-viewer *){width:100%;padding:.55rem .7rem;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 
+/* PDF viewer: keep the toolbar compact regardless of app-wide rules */
+ngx-extended-pdf-viewer{line-height:normal}
+ngx-extended-pdf-viewer #toolbarContainer{height:32px!important;padding:0 8px!important}
+ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!important}
+
 /* Login */
 .login{max-width:340px;margin:18vh auto;padding:0 1rem;display:grid;gap:.8rem}
 .err{color:var(--bad);min-height:1.4em;margin:0}
