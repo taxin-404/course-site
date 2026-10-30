@@ -1,7 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
-import { PdfViewer } from './pdf-viewer';
+import { PdfViewer, prefetchPdfAssets } from './pdf-viewer';
 
 type View =
   | { kind: 'browser'; courseTitle: string; path: string[] }
@@ -87,6 +87,12 @@ type View =
 })
 export class Course {
   protected readonly api = inject(Api);
+
+  constructor() {
+    // Fetch the PDF viewer scripts in the background once the page is idle.
+    const idle = (window as any).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 1500));
+    idle(() => prefetchPdfAssets());
+  }
   protected readonly view = signal<View | null>(null);
   protected readonly activeCourse = signal<CourseData | null>(null);
 
