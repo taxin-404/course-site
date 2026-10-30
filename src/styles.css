@@ -47,12 +47,11 @@ main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1.2rem 1.5rem;g
 .back-btn{white-space:nowrap;flex-shrink:0}
 .player-body{flex:1;overflow-y:auto;padding:1rem 1.5rem;display:flex;flex-direction:column;gap:.75rem}
 
-/* Breadcrumb */
-.breadcrumb{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;font-size:.9rem}
-.bc-btn{border:0;background:none;padding:.2rem .3rem;color:var(--acc);cursor:pointer;border-radius:4px;font-size:.9rem}
+/* Breadcrumb: path style  ./Courses/CourseName/folder/ */
+.breadcrumb{display:flex;align-items:center;flex-wrap:wrap;font:.9rem ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.bc-btn{border:0;background:none;padding:.15rem .2rem;color:var(--acc);cursor:pointer;border-radius:4px;font:inherit}
 .bc-btn:hover{text-decoration:underline}
 .bc-sep{color:var(--mute)}
-.bc-cur{color:var(--ink);font-weight:500;padding:.2rem .3rem}
 
 /* File browser */
 .browser{display:flex;flex-direction:column;gap:.25rem}
