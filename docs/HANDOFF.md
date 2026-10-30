@@ -245,3 +245,7 @@ done
 ```
 
 Always upload the `_fixed` version to R2.
+
+## 11. Next planned feature
+
+Google login (invite-only, ID-token flow): see `docs/PLAN-google-login.md`.
