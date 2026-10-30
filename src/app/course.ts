@@ -13,7 +13,7 @@ import { PdfViewer } from './pdf-viewer';
           <details [open]="$first">
             <summary>{{ c.title }} ({{ courseDone(c) }}/{{ courseTotal(c) }})</summary>
             <div class="bar"><i [style.width.%]="coursePercent(c)"></i></div>
-            @for (s of c.sections; track s.title) {
+            @for (s of c.sections; track $index) {
               @if (s.title) {
                 <div class="sec-label">{{ s.title }}</div>
               }
