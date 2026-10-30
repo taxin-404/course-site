@@ -5,7 +5,7 @@ import { PdfViewer, prefetchPdfAssets } from './pdf-viewer';
 
 type View =
   | { kind: 'browser'; courseTitle: string; path: string[] }
-  | { kind: 'player'; lesson: Lesson };
+  | { kind: 'player'; lesson: Lesson; courseTitle: string; path: string[] };
 
 @Component({
   selector: 'app-course',
@@ -63,19 +63,19 @@ type View =
           }
 
           <!-- Player / PDF viewer -->
-          @if (v.kind === 'player') {
+          @if (v.kind === 'player' && lesson(); as l) {
             <div class="player-bar">
               <button class="bc-btn back-btn" (click)="backToBrowser()">← Back</button>
-              <span class="player-title">{{ v.lesson.title }}</span>
-              <button [class.p]="!v.lesson.done" (click)="toggle(v.lesson)">
-                {{ v.lesson.done ? 'Completed ✓' : 'Mark as complete' }}
+              <span class="player-title">{{ l.title }}</span>
+              <button class="done-btn" [class.p]="!l.done" [class.is-done]="l.done" [attr.aria-pressed]="l.done" (click)="toggle(l)">
+                {{ l.done ? '✓ Completed' : 'Mark as complete' }}
               </button>
             </div>
             <div class="player-body">
-              @if (v.lesson.kind === 'pdf') {
-                <app-pdf-viewer [key]="v.lesson.id" />
+              @if (l.kind === 'pdf') {
+                <app-pdf-viewer [key]="l.id" />
               } @else {
-                <app-player [key]="v.lesson.id" (ended)="finish(v.lesson)" />
+                <app-player [key]="l.id" (ended)="finish(l)" />
               }
             </div>
           }
@@ -154,7 +154,7 @@ export class Course {
         .flatMap((c) => c.sections)
         .flatMap((s) => s.lessons)
         .find((l) => l.id === item.id);
-      if (lesson) this.view.set({ kind: 'player', lesson });
+      if (lesson) this.view.set({ kind: 'player', lesson, courseTitle: v.courseTitle, path: v.path });
     }
   }
 
@@ -166,9 +166,16 @@ export class Course {
   }
 
   protected backToBrowser(): void {
-    const course = this.activeCourse();
-    if (course) this.view.set({ kind: 'browser', courseTitle: course.title, path: [] });
+    const v = this.view();
+    if (v?.kind === 'player') this.view.set({ kind: 'browser', courseTitle: v.courseTitle, path: v.path });
   }
+
+  /** Always the live lesson from app state, so "done" updates immediately. */
+  protected readonly lesson = computed(() => {
+    const v = this.view();
+    if (!v || v.kind !== 'player') return null;
+    return this.api.courses().flatMap((c) => c.sections).flatMap((x) => x.lessons).find((x) => x.id === v.lesson.id) ?? v.lesson;
+  });
 
   protected courseTotal(c: CourseData): number {
     return c.sections.reduce((n, s) => n + s.lessons.length, 0);
