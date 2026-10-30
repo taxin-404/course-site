@@ -1,6 +1,27 @@
 import { Component, computed, inject, input } from '@angular/core';
-import { NgxExtendedPdfViewerModule } from 'ngx-extended-pdf-viewer';
+import { NgxExtendedPdfViewerModule, pdfDefaultOptions } from 'ngx-extended-pdf-viewer';
 import { Api } from './api';
+
+// Open fast: stream the file, fetch only the pages being viewed, in larger chunks
+// (default is 64 KB range requests with streaming off, which means many slow round trips).
+pdfDefaultOptions.disableStream = false;
+pdfDefaultOptions.disableAutoFetch = true;
+pdfDefaultOptions.rangeChunkSize = 1024 * 1024;
+
+/** Warm the browser cache with the viewer + worker scripts so the first PDF opens without waiting on them. */
+let prefetched = false;
+export function prefetchPdfAssets(): void {
+  if (prefetched) return;
+  prefetched = true;
+  const worker = pdfDefaultOptions.workerSrc();
+  for (const href of [worker, worker.replace('pdf.worker', 'viewer')]) {
+    const l = document.createElement('link');
+    l.rel = 'prefetch';
+    l.as = 'script';
+    l.href = href;
+    document.head.appendChild(l);
+  }
+}
 
 @Component({
   selector: 'app-pdf-viewer',
@@ -25,7 +46,7 @@ import { Api } from './api';
       [showPropertiesButton]="false"
       [contextMenuAllowed]="false"
       [enablePrint]="false"
-      [zoom]="'page-actual'"
+      [zoom]="'page-fit'"
       [theme]="theme"
     ></ngx-extended-pdf-viewer>
   `,
