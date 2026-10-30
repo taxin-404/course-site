@@ -13,7 +13,8 @@ course-site/
   worker/index.js      API, auth, streaming (the Worker)
   src/app/             Angular app
     api.ts               API client and app state (signals)
-    app.ts               shell: header, sign out, "Add student" dialog
+    app.ts               shell: header, sign out, admin toggle
+    admin.ts             admin panel: list/add/reset/promote/delete users
     login.ts             sign-in form
     course.ts            lesson list with progress, lesson view
     player.ts            HLS video player with watermark
@@ -50,14 +51,8 @@ Set up the `r2` remote once with `rclone config` (S3, provider Cloudflare, endpo
 1. Push this project to GitHub/GitLab with `wrangler.toml` at the repo root. Commit `package-lock.json`.
 2. Cloudflare dashboard, Workers & Pages: create a Worker from the repo. Set the **Deploy command** to `npm run deploy` (it runs the Angular build, then `wrangler deploy`). The Worker name must be `course-site`.
 3. If the build complains about the Node version, add a build variable `NODE_VERSION` set to `22` (Angular 21 needs Node 20.19+ or 22.12+).
-4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` and `SETUP_KEY` (random, 32+ characters).
-5. Create the admin (works once, while no users exist):
-   ```bash
-   curl -X POST https://YOUR-WORKER.workers.dev/api/setup \
-     -H "x-setup-key: YOUR_SETUP_KEY" -H "content-type: application/json" \
-     -d '{"email":"you@example.com","password":"a-strong-password"}'
-   ```
-6. Log in and use **Add student** to create accounts.
+4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters), `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Redeploy/restart so the Worker sees them.
+5. The first admin (owner) is created automatically from `ADMIN_EMAIL` / `ADMIN_PASSWORD` on the first request. Log in and open **Admin panel** to add students and other admins. The owner cannot be deleted or demoted from the panel.
 
 The D1 database and R2 bucket are created automatically on first deploy; tables are created on first request.
 
@@ -71,7 +66,7 @@ npm run api                        # terminal 1: Worker on :8787 (local D1 + R2)
 npm start                          # terminal 2: Angular on :4200, proxies /api to :8787
 ```
 
-Create the first admin with the `/api/setup` request against `http://localhost:8787`. To test with local files:
+Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.dev.vars`; that admin is created on the first request. To test with local files:
 `npx wrangler r2 object put "course-videos/01 Basics/Notes.pdf" --file ./Notes.pdf --local`
 
 ## Download protection (what it does and doesn't do)
@@ -91,10 +86,13 @@ About $0.015/GB-month on R2 with free egress (60 GB is roughly $0.75-$1/month). 
 
 | Endpoint | Access | Purpose |
 | --- | --- | --- |
-| `POST /api/setup` | setup key | Create first admin |
 | `POST /api/login`, `/api/logout` | public | Session |
 | `GET /api/me` | student | Current user |
 | `GET /api/course` | student | Sections, lessons, progress (from the bucket) |
 | `GET /api/media/<key>` | student | Playlist, segment, or PDF |
 | `POST /api/progress` | student | Mark lesson done/undone |
-| `POST /api/admin/users` | admin | Add a student |
+| `GET /api/admin/users` | admin | List users |
+| `POST /api/admin/users` | admin | Add a user (`is_admin` optional) |
+| `POST /api/admin/users/<id>/password` | admin | Reset password |
+| `POST /api/admin/users/<id>/role` | admin | Grant/revoke admin |
+| `DELETE /api/admin/users/<id>` | admin | Delete user |

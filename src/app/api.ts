@@ -3,6 +3,7 @@ import { Injectable, signal } from '@angular/core';
 export interface Lesson { id: string; title: string; kind: 'video' | 'pdf'; done: boolean }
 export interface Section { title: string | null; lessons: Lesson[] }
 export interface CourseData { title: string; sections: Section[] }
+export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean }
 export interface Me { id: number; email: string; is_admin: number }
 
 @Injectable({ providedIn: 'root' })
@@ -11,11 +12,11 @@ export class Api {
   readonly me = signal<Me | null | undefined>(undefined);
   readonly courses = signal<CourseData[]>([]);
 
-  private async req<T>(path: string, body?: unknown): Promise<T> {
-    const res = await fetch('/api/' + path, body === undefined ? {} : {
-      method: 'POST',
+  private async req<T>(path: string, body?: unknown, method?: string): Promise<T> {
+    const res = await fetch('/api/' + path, body === undefined && !method ? {} : {
+      method: method ?? 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Request failed');
@@ -53,9 +54,13 @@ export class Api {
     })));
   }
 
-  addStudent(email: string, password: string): Promise<unknown> {
-    return this.req('admin/users', { email, password });
+  listUsers(): Promise<AdminUser[]> { return this.req<AdminUser[]>('admin/users'); }
+  addUser(email: string, password: string, is_admin: boolean): Promise<unknown> {
+    return this.req('admin/users', { email, password, is_admin });
   }
+  resetPassword(id: number, password: string): Promise<unknown> { return this.req(`admin/users/${id}/password`, { password }); }
+  setRole(id: number, is_admin: boolean): Promise<unknown> { return this.req(`admin/users/${id}/role`, { is_admin }); }
+  deleteUser(id: number): Promise<unknown> { return this.req(`admin/users/${id}`, undefined, 'DELETE'); }
 
   mediaUrl(key: string): string {
     return '/api/media/' + key.split('/').map(encodeURIComponent).join('/');

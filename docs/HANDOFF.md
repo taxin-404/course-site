@@ -52,7 +52,7 @@ Cloudflare Worker  (worker/index.js)
 | --- | --- |
 | `worker/index.js` | Entire backend: auth, course listing, media streaming, progress, admin |
 | `src/app/api.ts` | `Api` service: fetch wrapper and app state as signals (`me`, `course`) |
-| `src/app/app.ts` | Root component: header, sign out, "Add student" dialog |
+| `src/app/app.ts` | Root component: header, sign out, admin toggle; `admin.ts` is the admin panel |
 | `src/app/login.ts` | Sign-in form |
 | `src/app/course.ts` | Sidebar with sections, lessons, progress bars, and the lesson view |
 | `src/app/player.ts` | HLS video player with a moving watermark |
@@ -73,7 +73,6 @@ watched (user_id INTEGER, lesson TEXT, PRIMARY KEY (user_id, lesson))      -- le
 
 | Endpoint | Auth | Notes |
 | --- | --- | --- |
-| `POST /api/setup` | header `x-setup-key` equals env `SETUP_KEY` | Creates the first admin; refuses if any user exists |
 | `POST /api/login`, `/api/logout` | none | Sets or clears the cookie |
 | `GET /api/me` | session | `{id, email, is_admin}` |
 | `GET /api/course` | session | `[{title, lessons:[{id, title, kind:'video'|'pdf', done}]}]` |
@@ -81,7 +80,7 @@ watched (user_id INTEGER, lesson TEXT, PRIMARY KEY (user_id, lesson))      -- le
 | `POST /api/progress` | session | `{lesson, done}` |
 | `POST /api/admin/users` | admin | `{email, password}` |
 
-Secrets (set in the dashboard, never in git): `SESSION_SECRET`, `SETUP_KEY`. Optional variable: `ALLOW_MP4`.
+Secrets (set in the dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` (first admin is seeded from these). Optional variable: `ALLOW_MP4`.
 
 ### Course discovery (`listCourse` in the Worker)
 

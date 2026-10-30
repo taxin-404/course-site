@@ -39,7 +39,19 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
 ];
 let ready;
-const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).catch((e) => { ready = null; throw e; }));
+// The first admin comes from Cloudflare secrets ADMIN_EMAIL + ADMIN_PASSWORD.
+// It is created on the first request if missing, and always kept as an admin.
+async function seedAdmin(env) {
+  const email = String(env.ADMIN_EMAIL || '').trim().toLowerCase();
+  if (!email || !env.ADMIN_PASSWORD) return;
+  const u = await env.DB.prepare('SELECT id, is_admin FROM users WHERE email = ?').bind(email).first();
+  if (!u) await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, 1)').bind(email, await hashPw(String(env.ADMIN_PASSWORD))).run();
+  else if (!u.is_admin) await env.DB.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').bind(u.id).run();
+}
+const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => seedAdmin(env)).catch((e) => { ready = null; throw e; }));
+const isOwner = (env, email) => !!env.ADMIN_EMAIL && email === String(env.ADMIN_EMAIL).trim().toLowerCase();
+const validEmail = (e) => typeof e === 'string' && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+const validPw = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
 
 // Bucket structure:
 //   <Course>/<file>                  → course with a flat lesson
@@ -116,13 +128,6 @@ export default {
     const m = req.method;
     try {
       await ensureSchema(env);
-      if (path === '/api/setup' && m === 'POST') {
-        const n = await env.DB.prepare('SELECT COUNT(*) c FROM users').first();
-        if (n.c > 0 || req.headers.get('x-setup-key') !== env.SETUP_KEY) return json({ error: 'Forbidden' }, 403);
-        const { email, password } = await req.json();
-        await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, 1)').bind(email.toLowerCase(), await hashPw(password)).run();
-        return json({ ok: true });
-      }
       if (path === '/api/login' && m === 'POST') {
         const { email, password } = await req.json();
         const u = await env.DB.prepare('SELECT id, pass FROM users WHERE email = ?').bind(String(email).toLowerCase()).first();
@@ -151,11 +156,46 @@ export default {
         await env.DB.prepare(done ? 'INSERT OR IGNORE INTO watched (user_id, lesson) VALUES (?, ?)' : 'DELETE FROM watched WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
         return json({ ok: true });
       }
-      if (path === '/api/admin/users' && m === 'POST') {
+      if (path.startsWith('/api/admin/')) {
         if (!u.is_admin) return json({ error: 'Admins only' }, 403);
-        const b = await req.json();
-        await env.DB.prepare('INSERT INTO users (email, pass) VALUES (?, ?)').bind(b.email.toLowerCase(), await hashPw(b.password)).run();
-        return json({ ok: true });
+        if (path === '/api/admin/users' && m === 'GET') {
+          const rows = (await env.DB.prepare('SELECT u.id, u.email, u.is_admin, (SELECT COUNT(*) FROM watched w WHERE w.user_id = u.id) AS watched FROM users u ORDER BY u.is_admin DESC, u.email').all()).results;
+          return json(rows.map((r) => ({ ...r, owner: isOwner(env, r.email) })));
+        }
+        if (path === '/api/admin/users' && m === 'POST') {
+          const b = await req.json();
+          const email = String(b.email || '').trim().toLowerCase();
+          if (!validEmail(email)) return json({ error: 'Enter a valid email' }, 400);
+          if (!validPw(b.password)) return json({ error: 'Password must be 8+ characters' }, 400);
+          await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, ?)').bind(email, await hashPw(b.password), b.is_admin ? 1 : 0).run();
+          return json({ ok: true });
+        }
+        const mm = /^\/api\/admin\/users\/(\d+)(?:\/(password|role))?$/.exec(path);
+        if (mm) {
+          const id = Number(mm[1]);
+          const t = await env.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(id).first();
+          if (!t) return json({ error: 'User not found' }, 404);
+          if (mm[2] === 'password' && m === 'POST') {
+            const b = await req.json();
+            if (!validPw(b.password)) return json({ error: 'Password must be 8+ characters' }, 400);
+            await env.DB.prepare('UPDATE users SET pass = ? WHERE id = ?').bind(await hashPw(b.password), id).run();
+            return json({ ok: true });
+          }
+          if (mm[2] === 'role' && m === 'POST') {
+            const b = await req.json();
+            if (isOwner(env, t.email) || t.id === u.id) return json({ error: 'You cannot change this admin' }, 400);
+            await env.DB.prepare('UPDATE users SET is_admin = ? WHERE id = ?').bind(b.is_admin ? 1 : 0, id).run();
+            return json({ ok: true });
+          }
+          if (!mm[2] && m === 'DELETE') {
+            if (isOwner(env, t.email) || t.id === u.id) return json({ error: 'You cannot delete this admin' }, 400);
+            await env.DB.batch([
+              env.DB.prepare('DELETE FROM watched WHERE user_id = ?').bind(id),
+              env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
+            ]);
+            return json({ ok: true });
+          }
+        }
       }
       return json({ error: 'Not found' }, 404);
     } catch (e) {

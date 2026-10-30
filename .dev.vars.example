@@ -1,7 +1,9 @@
 # Copy to .dev.vars for local development (never commit .dev.vars).
-# Both values must be random strings of 32+ characters.
+# SESSION_SECRET must be a random string of 32+ characters.
 SESSION_SECRET=replace-with-a-random-32-char-secret
-SETUP_KEY=replace-with-a-random-32-char-setup-key
+# The first admin is created from these two on the first request.
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=replace-with-a-strong-password
 
 # Optional: allow direct MP4/WebM playback (default: HLS only)
 # ALLOW_MP4=1

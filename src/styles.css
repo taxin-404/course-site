@@ -81,3 +81,11 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   nav{border-right:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:nowrap;overflow-x:auto;gap:.4rem;padding:.5rem}
   .course-btn{min-width:160px;flex-shrink:0}
 }
+
+.admin{max-width:900px;margin:1.5rem auto;padding:0 1rem;display:grid;gap:1rem}
+.admin .card{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:1rem;display:grid;gap:.6rem}
+.admin table.card{display:table;width:100%;border-collapse:collapse;padding:0}
+.admin th,.admin td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--line)}
+.admin .acts{display:flex;gap:.4rem;flex-wrap:wrap}
+.admin .chk{display:flex;gap:.5rem;align-items:center}
+@media(max-width:640px){.admin table.card{display:block;overflow-x:auto}}
