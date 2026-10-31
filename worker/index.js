@@ -59,6 +59,14 @@ async function migrate(env) {
   const hasVer = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'ver'").first();
   if (!hasVer.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
   await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)').run();
+  const had = await env.DB.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type = 'table' AND name = 'enrollments'").first();
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS enrollments (user_id INTEGER NOT NULL, course TEXT NOT NULL, PRIMARY KEY (user_id, course))').run();
+  if (!had.c) { // first deploy only: today's students keep access to every current course
+    const courses = (await listCourse(env)).map((c) => c.title);
+    const users = (await env.DB.prepare('SELECT id FROM users').all()).results;
+    const st = users.flatMap((x) => courses.map((c) => env.DB.prepare('INSERT OR IGNORE INTO enrollments (user_id, course) VALUES (?, ?)').bind(x.id, c)));
+    for (let i = 0; i < st.length; i += 50) await env.DB.batch(st.slice(i, i + 50));
+  }
 }
 const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => migrate(env)).then(() => seedAdmin(env)).catch((e) => { ready = null; throw e; }));
 
@@ -139,6 +147,18 @@ async function listCourse(env) {
   });
   cache = { at: Date.now(), data };
   return data;
+}
+
+// ---- Course access: a student only gets the courses an admin gave them (admins get all) ----
+const courseOf = (key) => String(key).split('/')[0];
+async function myCourses(env, u) {
+  if (u.is_admin) return null; // null = everything
+  return new Set((await env.DB.prepare('SELECT course FROM enrollments WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.course));
+}
+async function grant(env, emails, courses) {
+  const cs = (Array.isArray(courses) ? courses : []).slice(0, 100).map(String);
+  const st = emails.flatMap((e) => cs.map((c) => env.DB.prepare('INSERT OR IGNORE INTO enrollments (user_id, course) SELECT id, ? FROM users WHERE email = ?').bind(c, e)));
+  for (let i = 0; i < st.length; i += 50) await env.DB.batch(st.slice(i, i + 50));
 }
 
 // ---- Login throttling (stored in D1, so it works across all Worker instances) ----
@@ -311,7 +331,8 @@ const handle = async (req, env) => {
       if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin });
       if (path === '/api/course') {
         const w = new Set((await env.DB.prepare('SELECT lesson FROM watched WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.lesson));
-        return json((await listCourse(env)).map((c) => ({
+        const mine = await myCourses(env, u);
+        return json((await listCourse(env)).filter((c) => !mine || mine.has(c.title)).map((c) => ({
           title: c.title,
           sections: c.sections.map((s) => ({
             title: s.title,
@@ -319,11 +340,18 @@ const handle = async (req, env) => {
           })),
         })));
       }
-      if (path.startsWith('/api/media/')) return serve(req, env, decodeURIComponent(path.slice(11)), u);
+      if (path.startsWith('/api/media/')) {
+        const key = decodeURIComponent(path.slice(11));
+        const mine = await myCourses(env, u);
+        if (mine && !mine.has(courseOf(key))) return json({ error: 'Not allowed' }, 403);
+        return serve(req, env, key, u);
+      }
       if (path.startsWith('/api/notes/')) {
         // Private PDF notes: every query is scoped to the signed-in user, so nobody can read another student's notes.
         const lesson = decodeURIComponent(path.slice(11));
         if (lesson.length > 500 || !/\.pdf$/i.test(lesson)) return json({ error: 'Bad lesson' }, 400);
+        const mineN = await myCourses(env, u);
+        if (mineN && !mineN.has(courseOf(lesson))) return json({ error: 'Not allowed' }, 403);
         if (m === 'GET') {
           const r = await env.DB.prepare('SELECT data FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).first();
           return json({ data: r ? JSON.parse(r.data) : [] });
@@ -351,7 +379,12 @@ const handle = async (req, env) => {
         if (!u.is_admin) return json({ error: 'Admins only' }, 403);
         if (path === '/api/admin/users' && m === 'GET') {
           const rows = (await env.DB.prepare('SELECT u.id, u.email, u.is_admin, (SELECT COUNT(*) FROM watched w WHERE w.user_id = u.id) AS watched, (u.google_sub IS NOT NULL) AS google FROM users u ORDER BY u.is_admin DESC, u.email').all()).results;
-          return json(rows.map((r) => ({ ...r, owner: isOwner(env, r.email) })));
+          const by = {};
+          for (const e of (await env.DB.prepare('SELECT user_id, course FROM enrollments').all()).results) (by[e.user_id] ||= []).push(e.course);
+          return json(rows.map((r) => ({ ...r, owner: isOwner(env, r.email), courses: by[r.id] || [] })));
+        }
+        if (path === '/api/admin/courses' && m === 'GET') {
+          return json((await listCourse(env)).map((c) => c.title));
         }
         if (path === '/api/admin/users' && m === 'POST') {
           const b = await req.json();
@@ -360,6 +393,7 @@ const handle = async (req, env) => {
           if (!b.google_only && !validPw(b.password)) return json({ error: 'Password must be 8+ characters' }, 400);
           const pass = b.google_only ? await unusablePw() : await hashPw(b.password);
           await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, ?)').bind(email, pass, b.is_admin ? 1 : 0).run();
+          await grant(env, [email], b.courses);
           return json({ ok: true });
         }
         if (path === '/api/admin/users/bulk' && m === 'POST') {
@@ -390,9 +424,10 @@ const handle = async (req, env) => {
               else skipped.push({ email: r.email, reason: 'already exists' });
             });
           }
+          await grant(env, added.map((a) => a.email), b.courses);
           return json({ added, skipped });
         }
-        const mm = /^\/api\/admin\/users\/(\d+)(?:\/(password|role))?$/.exec(path);
+        const mm = /^\/api\/admin\/users\/(\d+)(?:\/(password|role|courses))?$/.exec(path);
         if (mm) {
           const id = Number(mm[1]);
           const t = await env.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(id).first();
@@ -401,6 +436,12 @@ const handle = async (req, env) => {
             const b = await req.json();
             if (!validPw(b.password)) return json({ error: 'Password must be 8+ characters' }, 400);
             await env.DB.prepare('UPDATE users SET pass = ?, ver = ver + 1 WHERE id = ?').bind(await hashPw(b.password), id).run();
+            return json({ ok: true });
+          }
+          if (mm[2] === 'courses' && m === 'POST') {
+            const b = await req.json();
+            await env.DB.prepare('DELETE FROM enrollments WHERE user_id = ?').bind(id).run();
+            await grant(env, [t.email], b.courses);
             return json({ ok: true });
           }
           if (mm[2] === 'role' && m === 'POST') {
@@ -414,6 +455,7 @@ const handle = async (req, env) => {
             await env.DB.batch([
               env.DB.prepare('DELETE FROM watched WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ?').bind(id),
+              env.DB.prepare('DELETE FROM enrollments WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
             ]);
             return json({ ok: true });
