@@ -5,6 +5,7 @@
 // folders exist only because keys share a prefix.
 //
 // handleFiles is mounted inside the /api/admin/ guard, so every route is already admin-only.
+import { presign, r2Config, s3Fetch } from './s3.js';
 
 const KEY_MAX = 500;
 const VIDEO_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|m3u8)$/i;
@@ -232,6 +233,132 @@ async function createFolder(env, rawPath, hooks) {
   return json({ ok: true });
 }
 
+// ---- Uploads ----
+// The browser uploads straight to R2 with presigned URLs; only the signing and the final
+// bookkeeping happen here, so a multi-gigabyte video never passes through the Worker.
+
+const SINGLE_MAX = 16 * 1024 * 1024; // above this the browser must use multipart
+const MAX_UPLOAD = 500 * 1024 ** 3;
+
+const unxml = (s) => String(s)
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+  .replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+const tag = (xml, name) => {
+  const m = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(xml || '');
+  return m ? unxml(m[1]) : '';
+};
+const escxml = (s) => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+const errText = (xml) => (tag(xml, 'Message') || String(xml || '').replace(/<[^>]*>/g, ' ')).trim().slice(0, 200) || 'no detail';
+
+function uploadKey(rawKey) {
+  const key = cleanKey(rawKey);
+  return key || null;
+}
+
+function uploadSize(raw, max = MAX_UPLOAD) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1 || n > max) return null;
+  return n;
+}
+
+function uploadIdOk(id) {
+  // R2 upload ids are long (about 250 characters), so the cap is generous but still bounded.
+  return typeof id === 'string' && id.length > 0 && id.length <= 512 && !/[<>&"'\s]/.test(id);
+}
+
+async function uploadStart(env, rawKey, rawSize, overwrite) {
+  const key = uploadKey(rawKey);
+  if (!key) return bad('That file name is not valid');
+  if (uploadSize(rawSize) === null) return bad('That file size is not supported');
+  if (!r2Config(env)) return bad('Uploads are not configured on this server', 503);
+  if (!overwrite && (await env.RESOURCES.head(key))) return bad('A file with that name already exists', 409);
+
+  const r = await s3Fetch(env, 'POST', key, { query: 'uploads' });
+  if (!r) return bad('Uploads are not configured on this server', 503);
+  const xml = await r.text();
+  if (!r.ok) return bad('Could not start the upload: ' + errText(xml), 502);
+  const uploadId = tag(xml, 'UploadId');
+  if (!uploadId) return bad('R2 did not return an upload id', 502);
+  return json({ uploadId, key });
+}
+
+async function uploadPartUrl(env, rawKey, uploadId, rawPart) {
+  const key = uploadKey(rawKey);
+  if (!key) return bad('That file name is not valid');
+  if (!uploadIdOk(uploadId)) return bad('That upload is not valid');
+  const part = Number(rawPart);
+  if (!Number.isInteger(part) || part < 1 || part > 10000) return bad('That part number is not valid');
+  const url = await presign(env, 'PUT', key, { query: `partNumber=${part}&uploadId=${encodeURIComponent(uploadId)}` });
+  if (!url) return bad('Uploads are not configured on this server', 503);
+  return json({ url });
+}
+
+async function uploadSingleUrl(env, rawKey, rawSize, overwrite) {
+  const key = uploadKey(rawKey);
+  if (!key) return bad('That file name is not valid');
+  if (uploadSize(rawSize, SINGLE_MAX) === null) return bad('That file is too big for a single request');
+  if (!r2Config(env)) return bad('Uploads are not configured on this server', 503);
+  if (!overwrite && (await env.RESOURCES.head(key))) return bad('A file with that name already exists', 409);
+  const url = await presign(env, 'PUT', key);
+  if (!url) return bad('Uploads are not configured on this server', 503);
+  return json({ url });
+}
+
+async function uploadComplete(env, rawKey, uploadId, parts, hooks) {
+  const key = uploadKey(rawKey);
+  if (!key) return bad('That file name is not valid');
+  if (!uploadIdOk(uploadId)) return bad('That upload is not valid');
+  if (!Array.isArray(parts) || !parts.length) return bad('No parts were uploaded');
+
+  const xml = '<CompleteMultipartUpload>' + parts.map((p) => {
+    const n = Number(p.partNumber);
+    return `<Part><PartNumber>${Number.isInteger(n) ? n : 0}</PartNumber><ETag>${escxml(p.etag)}</ETag></Part>`;
+  }).join('') + '</CompleteMultipartUpload>';
+
+  const r = await s3Fetch(env, 'POST', key, {
+    query: `uploadId=${encodeURIComponent(uploadId)}`,
+    body: xml,
+    headers: { 'content-type': 'application/xml' },
+  });
+  if (!r) return bad('Uploads are not configured on this server', 503);
+  const text = await r.text();
+  if (!r.ok) return bad('Could not finish the upload: ' + errText(text), 502);
+  hooks.invalidate();
+  return json({ ok: true });
+}
+
+async function uploadAbort(env, rawKey, uploadId) {
+  const key = uploadKey(rawKey);
+  if (!key) return bad('That file name is not valid');
+  if (!uploadIdOk(uploadId)) return bad('That upload is not valid');
+  const r = await s3Fetch(env, 'DELETE', key, { query: `uploadId=${encodeURIComponent(uploadId)}` });
+  if (!r) return bad('Uploads are not configured on this server', 503);
+  if (!r.ok) return bad('Could not cancel the upload', 502);
+  return json({ ok: true });
+}
+
+async function uploadParts(env, rawKey, url, method) {
+  const key = uploadKey(url.searchParams.get('key') || '');
+  const uploadId = url.searchParams.get('uploadId') || '';
+  if (!key) return bad('That file name is not valid');
+  if (!uploadIdOk(uploadId)) return bad('That upload is not valid');
+  const r = await s3Fetch(env, 'GET', key, { query: `uploadId=${encodeURIComponent(uploadId)}` });
+  if (!r) return bad('Uploads are not configured on this server', 503);
+  const xml = await r.text();
+  if (!r.ok) {
+    // A missing upload is how a reload learns it must start over.
+    return bad('That upload no longer exists', 404);
+  }
+  const parts = [...xml.matchAll(/<Part>([\s\S]*?)<\/Part>/g)].map((m) => ({
+    partNumber: Number(tag(m[1], 'PartNumber')),
+    etag: tag(m[1], 'ETag'),
+    size: Number(tag(m[1], 'Size')),
+  }));
+  return json({ parts });
+}
+
 export async function handleFiles(req, env, path, method, url, hooks) {
   if (!path.startsWith('/api/admin/files')) return null;
 
@@ -254,6 +381,30 @@ export async function handleFiles(req, env, path, method, url, hooks) {
   if (path === '/api/admin/files/folder' && method === 'POST') {
     const b = await req.json().catch(() => ({}));
     return createFolder(env, b.path, hooks);
+  }
+
+  if (path === '/api/admin/files/upload/start' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return uploadStart(env, b.key, b.size, b.overwrite);
+  }
+  if (path === '/api/admin/files/upload/part' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return uploadPartUrl(env, b.key, b.uploadId, b.partNumber);
+  }
+  if (path === '/api/admin/files/upload/url' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return uploadSingleUrl(env, b.key, b.size, b.overwrite);
+  }
+  if (path === '/api/admin/files/upload/complete' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return uploadComplete(env, b.key, b.uploadId, b.parts, hooks);
+  }
+  if (path === '/api/admin/files/upload/abort' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return uploadAbort(env, b.key, b.uploadId);
+  }
+  if (path === '/api/admin/files/upload/parts' && method === 'GET') {
+    return uploadParts(env, null, url, method);
   }
 
   return bad('Not found', 404);
