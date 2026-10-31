@@ -276,7 +276,7 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 /* Files view */
 .adm-ico.wide{width:auto;padding:0 .8rem!important;display:inline-flex;align-items:center;justify-content:center;gap:.4rem;font-size:.86rem;font-weight:600}
 .adm-ico.wide.on{background:var(--acc);color:var(--on-acc)}
-.files{display:grid;gap:.9rem}
+.files{display:grid;grid-template-columns:minmax(0,1fr);gap:.9rem;min-width:0}
 .files-head{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;padding:.6rem .7rem;background:var(--panel);border-radius:16px;box-shadow:var(--shadow)}
 .files-crumbs{display:flex;align-items:center;gap:.1rem;flex-wrap:wrap;min-width:0}
 .files-crumbs button{padding:.35rem .55rem;background:none;box-shadow:none;font-size:.9rem;color:var(--mute);border-radius:9px;font-weight:500}
@@ -284,8 +284,8 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 .files-crumbs button.here{color:var(--ink);font-weight:650}
 .files-crumbs svg{width:15px;height:15px;flex:none;fill:none;stroke:var(--mute);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .files-head-acts{display:flex;gap:.5rem;align-items:center}
-.files-list{display:grid;gap:.45rem}
-.files-row{display:flex;align-items:center;gap:.4rem;padding:.25rem;border-radius:15px;background:var(--panel);box-shadow:var(--shadow-sm);transition:box-shadow .15s}
+.files-list{display:grid;grid-template-columns:minmax(0,1fr);gap:.45rem;min-width:0}
+.files-row{display:flex;align-items:center;gap:.4rem;padding:.25rem;border-radius:15px;background:var(--panel);box-shadow:var(--shadow-sm);transition:box-shadow .15s;min-width:0}
 .files-row:hover{box-shadow:var(--shadow)}
 .files-open{display:flex;align-items:center;gap:.75rem;flex:1;min-width:0;padding:.5rem .6rem;background:none!important;box-shadow:none!important;text-align:left;border-radius:11px}
 .files-open:hover:not(:disabled){background:var(--acc-soft)!important;box-shadow:none!important}
