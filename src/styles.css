@@ -202,6 +202,10 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 .adm-col-act{text-align:right}
 .adm-col-act button{padding:.35rem .6rem;font-size:.85rem;background:none!important;box-shadow:none!important;color:var(--acc);font-weight:600}
 .adm-col-act button:hover:not(:disabled){background:var(--acc-soft)!important}
+.adm-ico{width:40px;height:40px;display:grid;place-items:center;padding:0!important}
+.adm-ico svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.adm-ico .spinning{animation:adm-spin .9s linear infinite}
+@keyframes adm-spin{to{transform:rotate(360deg)}}
 .adm-empty{margin:0;padding:1.8rem;text-align:center;color:var(--mute)}
 
 /* Skeleton */
@@ -283,6 +287,7 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
   .stat b{font-size:1.2rem;line-height:1.15}
   .stat span{font-size:.7rem;line-height:1.25}
   .adm-top h1{font-size:1.7rem}
+  .adm-ico{width:46px;height:46px}
   .adm-sub{font-size:.82rem}
   .adm-drawer{width:100vw;border-left:0;padding-bottom:env(safe-area-inset-bottom)}
   .adm-dialog{width:94vw}
