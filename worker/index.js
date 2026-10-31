@@ -48,6 +48,12 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS pdf_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS attempts (k TEXT PRIMARY KEY, n INTEGER NOT NULL, t INTEGER NOT NULL)',
+  'CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson TEXT NOT NULL, user_id INTEGER NOT NULL, parent_id INTEGER, body TEXT NOT NULL, created INTEGER NOT NULL)',
+  'CREATE INDEX IF NOT EXISTS idx_comments_lesson ON comments(lesson, created)',
+  'CREATE TABLE IF NOT EXISTS comment_likes (comment_id INTEGER NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY (comment_id, user_id))',
+  'CREATE TABLE IF NOT EXISTS video_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, body TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
+  'CREATE TABLE IF NOT EXISTS resources (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, note TEXT, created_by INTEGER NOT NULL, created INTEGER NOT NULL)',
+  'CREATE INDEX IF NOT EXISTS idx_resources_lesson ON resources(lesson, created)',
 ];
 let ready;
 // The owner comes from the Cloudflare secret ADMIN_EMAIL: the row is created on the first
@@ -170,6 +176,17 @@ async function listCourse(env) {
 
 // ---- Course access: a student only gets the courses an admin gave them (admins get all) ----
 const courseOf = (key) => String(key).split('/')[0];
+// Lesson-scoped features (comments, notes, resources) all ask the same question: does this
+// key exist in the bucket, and may this user see the course it belongs to?
+async function lessonAccess(env, u, key) {
+  if (!key || key.length > 500) return 'missing';
+  const course = (await listCourse(env)).find((c) => c.title === courseOf(key));
+  if (!course || !course.sections.some((s) => s.lessons.some((l) => l.id === key))) return 'missing';
+  if (u.is_admin) return 'ok';
+  const mine = await myCourses(env, u);
+  return mine && mine.has(courseOf(key)) ? 'ok' : 'denied';
+}
+const accessError = (access) => access === 'missing' ? json({ error: 'Not found' }, 404) : json({ error: 'Not allowed' }, 403);
 async function myCourses(env, u) {
   if (u.is_admin) return null; // null = everything
   return new Set((await env.DB.prepare('SELECT course FROM enrollments WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.course));
@@ -395,8 +412,136 @@ const handle = async (req, env) => {
         await env.DB.prepare(done ? 'INSERT OR IGNORE INTO watched (user_id, lesson) VALUES (?, ?)' : 'DELETE FROM watched WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
         return json({ ok: true });
       }
+      // ---- Lesson discussion, private notes and admin resources (video lessons) ----
+      if (path.startsWith('/api/lesson/') && path.endsWith('/comments')) {
+        const key = decodeURIComponent(path.slice('/api/lesson/'.length, -'/comments'.length));
+        const access = await lessonAccess(env, u, key);
+        if (access !== 'ok') return accessError(access);
+        if (m === 'GET') {
+          const rows = (await env.DB.prepare('SELECT c.id, c.parent_id, c.body, c.created, c.user_id, u.email FROM comments c JOIN users u ON u.id = c.user_id WHERE c.lesson = ? ORDER BY c.created DESC LIMIT 500').bind(key).all()).results;
+          const likes = (await env.DB.prepare('SELECT comment_id, COUNT(*) n FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE lesson = ?) GROUP BY comment_id').bind(key).all()).results;
+          const mine = new Set((await env.DB.prepare('SELECT cl.comment_id id FROM comment_likes cl JOIN comments c ON c.id = cl.comment_id WHERE c.lesson = ? AND cl.user_id = ?').bind(key, u.id).all()).results.map((r) => r.id));
+          const count = new Map(likes.map((r) => [r.comment_id, r.n]));
+          return json({
+            comments: rows.map((r) => {
+              const name = String(r.email || '?').split('@')[0] || '?';
+              return {
+                id: r.id, parent_id: r.parent_id, body: r.body, created: r.created,
+                name, initial: name[0].toUpperCase(),
+                likes: count.get(r.id) || 0, liked: mine.has(r.id),
+                own: r.user_id === u.id, can_delete: r.user_id === u.id || !!u.is_admin,
+              };
+            }),
+          });
+        }
+        if (m === 'POST') {
+          const b = await req.json();
+          const body = String(b.body || '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim();
+          if (!body) return json({ error: 'Write something first' }, 400);
+          if (body.length > 1000) return json({ error: 'Comments are limited to 1000 characters' }, 400);
+          let parent = null;
+          if (b.parent != null) {
+            parent = Number(b.parent);
+            const pc = await env.DB.prepare('SELECT id, parent_id, lesson FROM comments WHERE id = ?').bind(parent).first();
+            if (!pc || pc.lesson !== key || pc.parent_id != null) return json({ error: 'You can only reply to a comment' }, 400);
+          }
+          const recent = await env.DB.prepare('SELECT COUNT(*) n FROM comments WHERE user_id = ? AND created > ?').bind(u.id, Date.now() - 5 * 60e3).first();
+          if (recent.n >= 10) return json({ error: 'You are commenting too fast. Try again in a few minutes.' }, 429);
+          const now = Date.now();
+          const res = await env.DB.prepare('INSERT INTO comments (lesson, user_id, parent_id, body, created) VALUES (?, ?, ?, ?, ?)').bind(key, u.id, parent, body, now).run();
+          const name = u.email.split('@')[0];
+          return json({ comment: { id: res.meta.last_row_id, parent_id: parent, body, created: now, name, initial: name[0].toUpperCase(), likes: 0, liked: false, own: true, can_delete: true } });
+        }
+      }
+      {
+        const mm = /^\/api\/comments\/(\d+)\/like$/.exec(path);
+        if (mm && m === 'POST') {
+          const id = Number(mm[1]);
+          const c = await env.DB.prepare('SELECT id, lesson FROM comments WHERE id = ?').bind(id).first();
+          if (!c) return json({ error: 'Not found' }, 404);
+          const access = await lessonAccess(env, u, c.lesson);
+          if (access !== 'ok') return accessError(access);
+          const had = await env.DB.prepare('SELECT 1 x FROM comment_likes WHERE comment_id = ? AND user_id = ?').bind(id, u.id).first();
+          if (had) await env.DB.prepare('DELETE FROM comment_likes WHERE comment_id = ? AND user_id = ?').bind(id, u.id).run();
+          else await env.DB.prepare('INSERT INTO comment_likes (comment_id, user_id) VALUES (?, ?)').bind(id, u.id).run();
+          const n = await env.DB.prepare('SELECT COUNT(*) n FROM comment_likes WHERE comment_id = ?').bind(id).first();
+          return json({ liked: !had, likes: n.n });
+        }
+      }
+      {
+        const md = /^\/api\/comments\/(\d+)$/.exec(path);
+        if (md && m === 'DELETE') {
+          const id = Number(md[1]);
+          const c = await env.DB.prepare('SELECT id, lesson, user_id, parent_id FROM comments WHERE id = ?').bind(id).first();
+          if (!c) return json({ error: 'Not found' }, 404);
+          const access = await lessonAccess(env, u, c.lesson);
+          if (access !== 'ok') return accessError(access);
+          if (c.user_id !== u.id && !u.is_admin) return json({ error: 'Not allowed' }, 403);
+          const ids = [id];
+          if (c.parent_id == null) ids.push(...(await env.DB.prepare('SELECT id FROM comments WHERE parent_id = ?').bind(id).all()).results.map((r) => r.id));
+          await env.DB.batch([
+            ...ids.map((x) => env.DB.prepare('DELETE FROM comment_likes WHERE comment_id = ?').bind(x)),
+            env.DB.prepare('DELETE FROM comments WHERE id IN (' + ids.map(() => '?').join(',') + ')').bind(...ids),
+          ]);
+          return json({ ok: true });
+        }
+      }
+      if (path.startsWith('/api/lesson/') && path.endsWith('/notes')) {
+        // Private like the PDF notes: every query is scoped to the signed-in user.
+        const key = decodeURIComponent(path.slice('/api/lesson/'.length, -'/notes'.length));
+        const access = await lessonAccess(env, u, key);
+        if (access !== 'ok') return accessError(access);
+        if (m === 'GET') {
+          const r = await env.DB.prepare('SELECT body FROM video_notes WHERE user_id = ? AND lesson = ?').bind(u.id, key).first();
+          return json({ body: r ? r.body : '' });
+        }
+        if (m === 'PUT') {
+          const b = await req.json();
+          const body = String(b.body ?? '').replace(/\r\n/g, '\n').replace(/\s+$/, '');
+          if (body.length > 20000) return json({ error: 'Your notes on this lesson are too long to save' }, 413);
+          if (!body) await env.DB.prepare('DELETE FROM video_notes WHERE user_id = ? AND lesson = ?').bind(u.id, key).run();
+          else await env.DB.prepare('INSERT INTO video_notes (user_id, lesson, body, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, lesson) DO UPDATE SET body = excluded.body, updated = excluded.updated').bind(u.id, key, body, Date.now()).run();
+          return json({ ok: true });
+        }
+      }
+      if (path.startsWith('/api/lesson/') && path.endsWith('/resources')) {
+        const key = decodeURIComponent(path.slice('/api/lesson/'.length, -'/resources'.length));
+        const access = await lessonAccess(env, u, key);
+        if (access !== 'ok') return accessError(access);
+        if (m === 'GET') {
+          const rows = (await env.DB.prepare('SELECT id, title, url, note FROM resources WHERE lesson = ? ORDER BY created ASC').bind(key).all()).results;
+          return json({ resources: rows });
+        }
+      }
       if (path.startsWith('/api/admin/')) {
         if (!u.is_admin) return json({ error: 'Admins only' }, 403);
+        if (path.startsWith('/api/admin/lesson/') && path.endsWith('/resources') && m === 'POST') {
+          const key = decodeURIComponent(path.slice('/api/admin/lesson/'.length, -'/resources'.length));
+          const access = await lessonAccess(env, u, key);
+          if (access !== 'ok') return accessError(access);
+          const b = await req.json();
+          const title = String(b.title || '').trim();
+          const url = String(b.url || '').trim();
+          const note = String(b.note || '').trim();
+          if (!title) return json({ error: 'Give the resource a title' }, 400);
+          if (title.length > 120) return json({ error: 'Keep the title under 120 characters' }, 400);
+          if (!url || url.length > 800) return json({ error: 'Enter a link' }, 400);
+          let parsed;
+          try { parsed = new URL(url); } catch { return json({ error: 'Enter a valid http(s) link' }, 400); }
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return json({ error: 'Enter a valid http(s) link' }, 400);
+          if (note.length > 300) return json({ error: 'Keep the note under 300 characters' }, 400);
+          const n = await env.DB.prepare('SELECT COUNT(*) n FROM resources WHERE lesson = ?').bind(key).first();
+          if (n.n >= 100) return json({ error: 'This lesson already has 100 resources' }, 400);
+          const res = await env.DB.prepare('INSERT INTO resources (lesson, title, url, note, created_by, created) VALUES (?, ?, ?, ?, ?, ?)').bind(key, title, url, note || null, u.id, Date.now()).run();
+          return json({ resource: { id: res.meta.last_row_id, title, url, note: note || null } });
+        }
+        {
+          const mr = /^\/api\/admin\/resources\/(\d+)$/.exec(path);
+          if (mr && m === 'DELETE') {
+            await env.DB.prepare('DELETE FROM resources WHERE id = ?').bind(Number(mr[1])).run();
+            return json({ ok: true });
+          }
+        }
         if (path === '/api/admin/users' && m === 'GET') {
           const rows = (await env.DB.prepare('SELECT u.id, u.email, u.is_admin, (SELECT COUNT(*) FROM watched w WHERE w.user_id = u.id) AS watched, (u.google_sub IS NOT NULL) AS google FROM users u ORDER BY u.is_admin DESC, u.email').all()).results;
           const by = {};
@@ -478,6 +623,9 @@ const handle = async (req, env) => {
             await env.DB.batch([
               env.DB.prepare('DELETE FROM watched WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ?').bind(id),
+              env.DB.prepare('DELETE FROM video_notes WHERE user_id = ?').bind(id),
+              env.DB.prepare('DELETE FROM comments WHERE user_id = ?').bind(id),
+              env.DB.prepare('DELETE FROM comment_likes WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM enrollments WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
             ]);
