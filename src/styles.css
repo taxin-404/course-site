@@ -345,14 +345,14 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   .logo{font-size:1.5rem}
 
   /* Header lesson search: a magnifier that expands over the whole header */
-  .head-search{flex:0 0 auto;margin:0;justify-content:flex-end}
+  .head-search{flex:0 0 auto;margin:0 .4rem 0 auto;justify-content:flex-end}
   .head-field{display:none}
   .head-toggle{display:grid}
   .head-field input{font-size:16px;min-height:0}
   /* One close control on phones: the outer X clears and collapses together. */
   .head-clear{display:none}
   header.searching .logo,header.searching .head-actions{display:none}
-  header.searching .head-search{flex:1}
+  header.searching .head-search{flex:1;margin:0}
   header.searching .head-field{display:flex;max-width:none}
   header.searching .head-toggle{display:none}
   header.searching .head-close{display:grid}
