@@ -74,6 +74,112 @@ async function listFolder(env, prefix) {
   return { path: prefix, dirs, files };
 }
 
+// ---- Moving and renaming ----
+//
+// Order matters: copy, rewrite the rows, then delete the originals. A failure after the old
+// objects are gone would orphan student data, so the delete is last and the whole thing is
+// safe to run twice (an identical copy at the target is treated as already done).
+
+const LESSON_ROWS = [
+  'UPDATE comments SET lesson = ? WHERE lesson = ?',
+  'UPDATE OR REPLACE video_notes SET lesson = ? WHERE lesson = ?',
+  'UPDATE OR REPLACE pdf_notes SET lesson = ? WHERE lesson = ?',
+  'UPDATE OR REPLACE watched SET lesson = ? WHERE lesson = ?',
+  'UPDATE resources SET lesson = ? WHERE lesson = ?',
+];
+
+async function listAll(env, prefix) {
+  const out = [];
+  let cursor;
+  do {
+    const r = await env.RESOURCES.list({ prefix, cursor, limit: 1000 });
+    out.push(...r.objects);
+    cursor = r.truncated ? r.cursor : undefined;
+  } while (cursor);
+  return out;
+}
+
+async function runChunks(env, statements, size = 50) {
+  for (let i = 0; i < statements.length; i += size) {
+    await env.DB.batch(statements.slice(i, i + size));
+  }
+}
+
+async function moveEntry(env, rawFrom, rawTo, hooks) {
+  const from = cleanPath(rawFrom);
+  const to = cleanPath(rawTo);
+  if (from === null || !from || to === null || !to) return bad('That name is not valid');
+  if (from === to) return bad('That is the same place');
+
+  const single = await env.RESOURCES.head(from);
+  const objects = single ? [single] : await listAll(env, from + '/');
+  if (!objects.length) return bad('Not found', 404);
+  if (objects.length > 1000) return bad('That folder holds too many files to move in one go', 413);
+
+  if (single) {
+    if (!to.includes('/')) return bad('A file must stay inside a course');
+    // Moving a lesson to a key the site will not show would hide its notes, comments and
+    // progress for good. Deleting is the honest way to remove a lesson.
+    if (isLessonKey(from) && !isLessonKey(to)) {
+      return bad('A lesson cannot be renamed to a file the site will not show. Delete it instead.');
+    }
+  } else {
+    if (from.includes('/') && !to.includes('/')) return bad('A section must stay inside a course');
+    if (!from.includes('/') && to.includes('/')) return bad('A course cannot be moved into another course');
+    if (to.startsWith(from + '/')) return bad('A folder cannot move inside itself');
+  }
+
+  const pairs = objects.map((o) => ({ from: o.key, to: to + o.key.slice(from.length) }));
+  const copies = [];
+  for (const p of pairs) {
+    const [src, dst] = await Promise.all([env.RESOURCES.head(p.from), env.RESOURCES.head(p.to)]);
+    if (!src) return bad('Not found: ' + p.from, 404);
+    if (dst) {
+      if (dst.size === src.size && dst.etag === src.etag) { p.skip = true; continue; } // a retry
+      return bad('Something already exists at ' + p.to, 409);
+    }
+    copies.push(p);
+  }
+
+  const written = [];
+  try {
+    for (const p of copies) {
+      const obj = await env.RESOURCES.get(p.from);
+      if (!obj) return bad('Not found: ' + p.from, 404);
+      await env.RESOURCES.put(p.to, obj.body, { httpMetadata: obj.httpMetadata });
+      written.push(p.to);
+    }
+  } catch (e) {
+    if (written.length) await env.RESOURCES.delete(written).catch(() => {});
+    return bad('Could not copy the files: ' + (e && e.message ? e.message : e), 500);
+  }
+
+  // Student data follows the lesson key. A course rename takes its enrollments with it;
+  // moving a lesson to another course leaves enrollments alone (they are per course).
+  const statements = pairs
+    .filter((p) => isLessonKey(p.from) && isLessonKey(p.to))
+    .flatMap((p) => LESSON_ROWS.map((sql) => env.DB.prepare(sql).bind(p.to, p.from)));
+  if (!single && !from.includes('/')) {
+    statements.push(env.DB.prepare('UPDATE OR REPLACE enrollments SET course = ? WHERE course = ?').bind(to, from));
+  }
+  try {
+    await runChunks(env, statements);
+  } catch (e) {
+    if (written.length) await env.RESOURCES.delete(written).catch(() => {});
+    return bad('Could not update the lesson records: ' + (e && e.message ? e.message : e), 500);
+  }
+
+  hooks.invalidate();
+  const olds = pairs.filter((p) => !p.skip).map((p) => p.from);
+  try {
+    for (let i = 0; i < olds.length; i += 1000) await env.RESOURCES.delete(olds.slice(i, i + 1000));
+  } catch {
+    // Both copies exist, which the site survives; running the same move again finishes it.
+    return json({ ok: true, warning: 'Moved, but the old files could not be removed yet. Run it again.' });
+  }
+  return json({ ok: true, moved: pairs.length });
+}
+
 export async function handleFiles(req, env, path, method, url, hooks) {
   if (!path.startsWith('/api/admin/files')) return null;
 
@@ -81,6 +187,11 @@ export async function handleFiles(req, env, path, method, url, hooks) {
     const prefix = cleanPath(url.searchParams.get('prefix') || '');
     if (prefix === null) return bad('That folder name is not valid');
     return json(await listFolder(env, prefix));
+  }
+
+  if (path === '/api/admin/files/move' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return moveEntry(env, b.from, b.to, hooks);
   }
 
   return bad('Not found', 404);
