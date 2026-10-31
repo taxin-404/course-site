@@ -97,6 +97,24 @@ export class Course {
     idle(() => prefetchPdfAssets());
     // A student with a single course goes straight into it
     effect(() => { const cs = this.api.courses(); if (cs.length === 1 && !untracked(() => this.view())) this.openCourse(cs[0]); });
+    // The header search can jump to a course or a lesson from anywhere in the app.
+    effect(() => {
+      const req = this.search.request();
+      if (!req) return;
+      this.search.request.set(null);
+      const course = this.api.courses().find((c) => c.title === req.course);
+      if (!course) return;
+      this.activeCourse.set(course);
+      this.search.query.set('');
+      this.search.expanded.set(false);
+      if (req.lesson) {
+        const lesson = course.sections.flatMap((sec) => sec.lessons).find((l) => l.id === req.lesson);
+        if (!lesson) return;
+        this.view.set({ kind: 'player', lesson, courseTitle: course.title, path: req.path });
+        return;
+      }
+      this.view.set({ kind: 'browser', courseTitle: course.title, path: [] });
+    });
   }
 
   protected home(): void { this.view.set(null); this.activeCourse.set(null); this.search.reset(); }
@@ -109,15 +127,6 @@ export class Course {
     const v = this.view();
     const course = this.activeCourse();
     if (!v || v.kind !== 'browser' || !course) return [];
-
-    // While searching, show a flat list of matching lessons in the whole course
-    const q = this.search.query().trim().toLowerCase();
-    if (q) {
-      return course.sections
-        .flatMap((s) => s.lessons.filter((l) => l.title.toLowerCase().includes(q)))
-        .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }))
-        .map((l) => ({ id: l.id, name: l.title, kind: l.kind, done: l.done }));
-    }
 
     const currentPath = v.path; // e.g. [] = course root, ['Section'] = inside section
 
@@ -156,7 +165,6 @@ export class Course {
     this.activeCourse.set(c);
     this.search.query.set('');
     this.search.expanded.set(false);
-    this.search.visible.set(true);
     this.view.set({ kind: 'browser', courseTitle: c.title, path: [] });
   }
 
@@ -173,8 +181,6 @@ export class Course {
         .flatMap((s) => s.lessons)
         .find((l) => l.id === item.id);
       if (lesson) {
-        // Watching a lesson: tuck the header search away, but keep the query for Back.
-        this.search.visible.set(false);
         this.search.expanded.set(false);
         this.view.set({ kind: 'player', lesson, courseTitle: v.courseTitle, path: v.path });
       }
@@ -191,7 +197,7 @@ export class Course {
   protected backToBrowser(): void {
     const v = this.view();
     if (v?.kind === 'player') {
-      this.search.visible.set(true);
+      this.search.expanded.set(false);
       this.view.set({ kind: 'browser', courseTitle: v.courseTitle, path: v.path });
     }
   }

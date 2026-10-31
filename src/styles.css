@@ -64,17 +64,36 @@ header div{display:flex;gap:.55rem}
 header button{white-space:nowrap}
 
 /* Lesson search in the header: sits between the logo and the account buttons */
-.head-search{display:flex;align-items:center;gap:.5rem;flex:1;min-width:0;justify-content:center;margin:0 clamp(.6rem,2.5vw,1.6rem)}
+.head-search{position:relative;display:flex;align-items:center;gap:.5rem;flex:1;min-width:0;justify-content:center;margin:0 clamp(.6rem,2.5vw,1.6rem)}
 .head-field{display:flex;align-items:center;gap:.5rem;flex:1;max-width:520px;height:38px;padding:0 .4rem 0 .75rem;border-radius:11px;background:var(--field);box-shadow:inset 0 1px 2px rgba(0,0,0,.07);transition:background .15s,box-shadow .15s}
 .head-field:focus-within{background:var(--panel-2);box-shadow:0 0 0 3px var(--acc-soft),inset 0 1px 2px rgba(0,0,0,.05)}
 .head-field input{flex:1;min-width:0;min-height:0;height:100%;padding:0;border:0;border-radius:0;background:none;box-shadow:none;font-size:.9rem}
 .head-field input:focus{box-shadow:none}
+/* The field draws its own clear control; the UA one would be a second X. */
+.head-field input::-webkit-search-cancel-button,.head-field input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
 .head-mag{width:16px;height:16px;flex:none;fill:none;stroke:var(--mute);stroke-width:2;stroke-linecap:round}
 .head-clear{width:26px;height:26px;padding:0;display:grid;place-items:center;border-radius:8px;background:none;box-shadow:none;color:var(--mute)}
 .head-clear:hover:not(:disabled){background:var(--acc-soft);box-shadow:none;color:var(--ink)}
 .head-clear svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
-.head-toggle,.head-close{display:none;width:38px;height:38px;padding:0;place-items:center}
-.head-toggle svg,.head-close svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.head-toggle,.head-close,.head-burger{display:none;width:38px;height:38px;padding:0;place-items:center}
+.head-toggle svg,.head-close svg,.head-burger svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+
+/* Search results: a panel under the field, listing courses and lessons with their path */
+.head-results{position:absolute;left:50%;top:calc(100% + .5rem);z-index:20;display:grid;gap:.1rem;width:min(520px,100%);max-height:min(62vh,440px);overflow:auto;padding:.35rem;background:var(--panel);border-radius:14px;box-shadow:var(--shadow);transform:translateX(-50%);text-align:left}
+.hr-label{margin:.2rem .6rem .15rem;font-size:.68rem;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.head-results button{display:flex;align-items:center;gap:.6rem;width:100%;padding:.55rem .6rem;border-radius:10px;background:none;box-shadow:none;text-align:left}
+.head-results button:hover:not(:disabled){background:var(--acc-soft);box-shadow:none}
+.hr-kind{width:22px;flex:none;text-align:center;font-size:1rem;line-height:1}
+.hr-text{display:grid;gap:.05rem;min-width:0}
+.hr-name{font-size:.9rem;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hr-path{font-size:.76rem;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hr-empty{margin:0;padding:.5rem .6rem;font-size:.88rem;color:var(--mute)}
+
+/* Phone account menu (the hamburger replaces the header buttons) */
+.head-menu{display:none}
+.head-menu button{display:flex;align-items:center;gap:.6rem;width:100%;padding:.6rem .7rem;border-radius:10px;background:none;box-shadow:none;text-align:left;font-size:.9rem}
+.head-menu button:hover:not(:disabled){background:var(--acc-soft);box-shadow:none}
+.head-menu button svg{width:17px;height:17px;flex:none;fill:none;stroke:var(--mute);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 /* ===== Login ===== */
 .login{display:grid;gap:.85rem;width:min(390px,92vw);margin:14vh auto;padding:2rem 1.7rem;background:var(--panel);border-radius:20px;box-shadow:var(--shadow)}
@@ -351,11 +370,17 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   .head-field input{font-size:16px;min-height:0}
   /* One close control on phones: the outer X clears and collapses together. */
   .head-clear{display:none}
-  header.searching .logo,header.searching .head-actions{display:none}
+  .head-actions{display:none}
+  .head-burger{display:grid}
+  header.searching .logo,header.searching .head-burger{display:none}
   header.searching .head-search{flex:1;margin:0}
   header.searching .head-field{display:flex;max-width:none}
   header.searching .head-toggle{display:none}
   header.searching .head-close{display:grid}
+
+  /* The account menu drops out of the header, right-aligned like the burger */
+  .head-menu{position:absolute;top:calc(100% + .45rem);right:max(.8rem,env(safe-area-inset-right));z-index:30;display:grid;gap:.15rem;width:min(240px,calc(100vw - 1.6rem));padding:.35rem;background:var(--panel);border-radius:14px;box-shadow:var(--shadow);opacity:0;visibility:hidden;transform:translateY(-6px);transition:opacity .15s,transform .15s,visibility .15s}
+  .head-menu.open{opacity:1;visibility:visible;transform:none}
 
   .layout{grid-template-columns:1fr;height:auto;overflow:visible}
   .course-name{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
