@@ -48,7 +48,8 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 
 ## Accounts and the Admin panel
 
-- **The first admin comes from Cloudflare secrets** `ADMIN_EMAIL` and `ADMIN_PASSWORD`. The Worker creates it on the first request and always keeps it an admin. It is the **Owner**: it cannot be deleted or demoted in the panel. Changing `ADMIN_PASSWORD` later does *not* overwrite the stored password; use **Reset password** in the panel.
+- **The Owner comes from the Cloudflare secret `ADMIN_EMAIL`.** The Worker creates that account on the first request (as an admin) and always keeps it an admin, so that address can sign in with **Google** straight away — the first Google login links the account by matching the verified email. It cannot be deleted or demoted in the panel.
+- `ADMIN_PASSWORD` is optional and takes effect whenever it changes: set it and the Owner can also sign in with email + password; remove the secret and the stored password is replaced by an unusable marker, so only Google works. The password never has to be reset in the panel.
 - Admins see an **Admin panel** button in the header. In the panel they can add a user (optionally as admin), reset any password, grant or remove admin, and delete a user (their progress is removed too). Admins cannot delete or demote themselves.
 - Passwords must be 8+ characters; emails are validated and stored lowercase.
 - There is no self-signup. Users must be added by an admin first.
@@ -97,8 +98,8 @@ Option B, HLS (harder to save as a single file): `./tools/make-hls.sh videos hls
 1. Push this project to GitHub/GitLab with `wrangler.toml` at the repo root. Commit `package-lock.json`.
 2. Cloudflare dashboard, Workers & Pages: create a Worker from the repo. Set the **Deploy command** to `npm run deploy` (Angular build, then `wrangler deploy`). The Worker name must be `course-site`.
 3. If the build complains about Node, add a build variable `NODE_VERSION` = `22` (Angular 21 needs Node 20.19+ or 22.12+).
-4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters), `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Optional: variable `GOOGLE_CLIENT_ID` for Google sign-in. Redeploy so the Worker sees them.
-5. Open the site and sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, then use **Admin panel** to add students.
+4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters) and `ADMIN_EMAIL` (the Owner, e.g. your Gmail). `ADMIN_PASSWORD` is optional — add it only if the Owner should also be able to sign in with a password. Set `GOOGLE_CLIENT_ID` for Google sign-in. Redeploy so the Worker sees them.
+5. Open the site and sign in as the Owner with **Continue with Google** (or `ADMIN_EMAIL` / `ADMIN_PASSWORD` if you set the password), then use **Admin panel** to add students.
 
 The D1 database and R2 bucket are created automatically on first deploy; tables are created on the first request.
 
@@ -108,7 +109,7 @@ If the site shows an old version after a push, check the **Builds** tab: a faile
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars     # set SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD
+cp .dev.vars.example .dev.vars     # set SESSION_SECRET, ADMIN_EMAIL (ADMIN_PASSWORD optional)
 npm run build                      # once: the Worker needs dist/ to exist
 npm run api                        # terminal 1: Worker on :8787 (local D1 + R2)
 npm start                          # terminal 2: Angular on :4200, proxies /api to :8787

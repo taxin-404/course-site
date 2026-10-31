@@ -44,14 +44,27 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS attempts (k TEXT PRIMARY KEY, n INTEGER NOT NULL, t INTEGER NOT NULL)',
 ];
 let ready;
-// The first admin comes from Cloudflare secrets ADMIN_EMAIL + ADMIN_PASSWORD.
-// It is created on the first request if missing, and always kept as an admin.
+// The owner comes from the Cloudflare secret ADMIN_EMAIL: the row is created on the first
+// request if missing and always kept as an admin, so that email can sign in with Google
+// (the Google callback links the account by matching the verified email).
+// ADMIN_PASSWORD is optional but authoritative: when it is set the owner can also sign in
+// with that password, when it is missing or changed the stored password follows the secret,
+// and with no secret at all the row keeps the unusable-password marker so password login fails.
 async function seedAdmin(env) {
   const email = String(env.ADMIN_EMAIL || '').trim().toLowerCase();
-  if (!email || !env.ADMIN_PASSWORD) return;
-  const u = await env.DB.prepare('SELECT id, is_admin FROM users WHERE email = ?').bind(email).first();
-  if (!u) await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, 1)').bind(email, await hashPw(String(env.ADMIN_PASSWORD))).run();
-  else if (!u.is_admin) await env.DB.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').bind(u.id).run();
+  if (!email) return;
+  const password = env.ADMIN_PASSWORD ? String(env.ADMIN_PASSWORD) : '';
+  const u = await env.DB.prepare('SELECT id, is_admin, pass FROM users WHERE email = ?').bind(email).first();
+  if (!u) {
+    await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, 1)').bind(email, password ? await hashPw(password) : await unusablePw()).run();
+    return;
+  }
+  if (!u.is_admin) await env.DB.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').bind(u.id).run();
+  if (password && (u.pass === '!' || !(await checkPw(password, u.pass)))) {
+    await env.DB.prepare('UPDATE users SET pass = ? WHERE id = ?').bind(await hashPw(password), u.id).run();
+  } else if (!password && u.pass !== '!') {
+    await env.DB.prepare('UPDATE users SET pass = ? WHERE id = ?').bind(await unusablePw(), u.id).run();
+  }
 }
 async function migrate(env) {
   const has = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'google_sub'").first();

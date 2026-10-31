@@ -1,8 +1,9 @@
 # Copy to .dev.vars for local development (never commit .dev.vars).
 # SESSION_SECRET must be a random string of 32+ characters.
 SESSION_SECRET=replace-with-a-random-32-char-secret
-# The first admin is created from these two on the first request.
-ADMIN_EMAIL=admin@example.com
+# The Owner is created from ADMIN_EMAIL on the first request and signs in with Google.
+ADMIN_EMAIL=you@gmail.com
+# Optional: also allow email + password for the Owner (remove it to make the Owner Google-only).
 ADMIN_PASSWORD=replace-with-a-strong-password
 
 # Optional: allow direct MP4/WebM playback (default: HLS only)
