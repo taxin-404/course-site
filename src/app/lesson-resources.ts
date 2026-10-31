@@ -48,7 +48,9 @@ import { Api, Lesson, ResourceItem } from './api';
         <ul class="lr-list">
           @for (r of rows(); track r.id) {
             <li class="lr-item">
-              <span class="lr-icon" aria-hidden="true">🔗</span>
+              <span class="lr-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M9.5 14.5 14.5 9.5" /><path d="M11 7l1.8-1.8a4 4 0 0 1 5.6 5.6L16.6 12.6" /><path d="M13 17l-1.8 1.8a4 4 0 0 1-5.6-5.6L7.4 11.4" /></svg>
+              </span>
               <div class="lr-body">
                 <a class="lr-title" [href]="r.url" target="_blank" rel="noopener noreferrer">{{ r.title }}</a>
                 <span class="lr-host">{{ host(r.url) }}</span>

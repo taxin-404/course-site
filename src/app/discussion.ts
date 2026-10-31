@@ -48,11 +48,12 @@ import { Api, Comment, Lesson } from './api';
               <p class="dc-body">{{ c.body }}</p>
               <div class="dc-actions">
                 <button type="button" class="dc-act" [class.liked]="c.liked" [attr.aria-pressed]="c.liked" aria-label="Like comment" (click)="like(c)">
-                  <span aria-hidden="true">{{ c.liked ? '♥' : '♡' }}</span> @if (c.likes) { <span>{{ c.likes }}</span> }
+                  <svg class="dc-heart" [class.filled]="c.liked" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-9a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 4.6-7 9-7 9z" /></svg>
+                  @if (c.likes) { <span>{{ c.likes }}</span> }
                 </button>
                 <button type="button" class="dc-act" (click)="toggleReply(c.id)">Reply</button>
                 @if (c.can_delete) {
-                  <button type="button" class="dc-act del" aria-label="Delete comment" title="Delete comment" (click)="remove(c)">×</button>
+                  <button type="button" class="dc-act del" aria-label="Delete comment" title="Delete comment" (click)="remove(c)"><svg class="dc-trash" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg></button>
                 }
               </div>
 
@@ -71,10 +72,11 @@ import { Api, Comment, Lesson } from './api';
                       <p class="dc-body">{{ r.body }}</p>
                       <div class="dc-actions">
                         <button type="button" class="dc-act" [class.liked]="r.liked" [attr.aria-pressed]="r.liked" aria-label="Like reply" (click)="like(r)">
-                          <span aria-hidden="true">{{ r.liked ? '♥' : '♡' }}</span> @if (r.likes) { <span>{{ r.likes }}</span> }
+                          <svg class="dc-heart" [class.filled]="r.liked" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-9a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 4.6-7 9-7 9z" /></svg>
+                          @if (r.likes) { <span>{{ r.likes }}</span> }
                         </button>
                         @if (r.can_delete) {
-                          <button type="button" class="dc-act del" aria-label="Delete reply" title="Delete reply" (click)="remove(r)">×</button>
+                          <button type="button" class="dc-act del" aria-label="Delete reply" title="Delete reply" (click)="remove(r)"><svg class="dc-trash" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg></button>
                         }
                       </div>
                     </div>

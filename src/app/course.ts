@@ -39,10 +39,18 @@ type View =
             <div class="browser">
               @for (item of browserItems(); track item.id) {
                 <button class="fb-item" (click)="onItemClick(item)">
-                  <span class="fb-icon">{{ item.kind === 'folder' ? '📁' : item.kind === 'pdf' ? '📄' : '🎬' }}</span>
+                  <span class="fb-icon" aria-hidden="true">
+                    @if (item.kind === 'folder') {
+                      <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+                    } @else if (item.kind === 'pdf') {
+                      <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
+                    } @else {
+                      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m10 9 5 3-5 3z" /></svg>
+                    }
+                  </span>
                   <span class="fb-name">{{ item.name }}</span>
                   @if (item.kind !== 'folder' && item.done) {
-                    <span class="fb-done">✓</span>
+                    <span class="fb-done" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7" /></svg></span>
                   }
                 </button>
               } @empty {
@@ -54,10 +62,16 @@ type View =
           <!-- Player / PDF viewer -->
           @if (v.kind === 'player' && lesson(); as l) {
             <div class="player-bar">
-              <button class="bc-btn back-btn" (click)="backToBrowser()">← Back</button>
+              <button class="bc-btn back-btn" (click)="backToBrowser()">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
+                Back
+              </button>
               <span class="player-title">{{ l.title }}</span>
               <button class="done-btn" [class.p]="!l.done" [class.is-done]="l.done" [attr.aria-pressed]="l.done" (click)="toggle(l)">
-                {{ l.done ? '✓ Completed' : 'Mark as complete' }}
+                @if (l.done) {
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
+                }
+                {{ l.done ? 'Completed' : 'Mark as complete' }}
               </button>
             </div>
             <div class="player-body">
@@ -77,7 +91,10 @@ type View =
                 <span class="course-name">{{ c.title }}</span>
                 <span class="course-count">{{ courseDone(c) }}/{{ courseTotal(c) }} lessons</span>
                 <span class="course-bar"><i [style.width.%]="coursePercent(c)"></i></span>
-                <span class="card-go">{{ courseDone(c) ? 'Continue →' : 'Start →' }}</span>
+                <span class="card-go">
+                  {{ courseDone(c) ? 'Continue' : 'Start' }}
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                </span>
               </button>
             } @empty {
               <p class="empty">No courses yet. Ask the admin to give you access.</p>

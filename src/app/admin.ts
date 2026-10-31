@@ -197,7 +197,7 @@ const MODES: { key: CourseMode; label: string }[] = [
             <strong>{{ u.email }}</strong>
             <small>{{ u.is_admin ? (u.owner ? 'Owner · full access' : 'Administrator') : 'Student' }}@if (u.google) { · Google sign-in }</small>
           </div>
-          <button type="button" class="adm-close" aria-label="Close" (click)="closeDrawer()">✕</button>
+          <button type="button" class="adm-close" aria-label="Close" (click)="closeDrawer()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg></button>
         </header>
 
         <div class="adm-drawer-body">
@@ -258,7 +258,7 @@ const MODES: { key: CourseMode; label: string }[] = [
       <div class="adm-dialog wide" role="dialog" aria-modal="true" aria-label="Add users">
         <header class="adm-dialog-top">
           <h3>Add users</h3>
-          <button type="button" class="adm-close" aria-label="Close" (click)="closeAdd()">✕</button>
+          <button type="button" class="adm-close" aria-label="Close" (click)="closeAdd()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg></button>
         </header>
 
         <div class="tabs">
@@ -377,7 +377,7 @@ const MODES: { key: CourseMode; label: string }[] = [
       <div class="adm-dialog" role="dialog" aria-modal="true" aria-label="Reset password">
         <header class="adm-dialog-top">
           <h3>Reset password</h3>
-          <button type="button" class="adm-close" aria-label="Close" (click)="closeReset()">✕</button>
+          <button type="button" class="adm-close" aria-label="Close" (click)="closeReset()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg></button>
         </header>
         <div class="adm-form">
           <p class="adm-muted sm">New password for <b>{{ u.email }}</b>. They will be signed out everywhere.</p>

@@ -58,7 +58,9 @@ interface LessonHit {
                   <p class="hr-label">Courses</p>
                   @for (c of courseHits(); track c.title) {
                     <button type="button" role="option" (click)="openCourseHit(c)">
-                      <span class="hr-kind" aria-hidden="true">📚</span>
+                      <span class="hr-kind" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" /><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20" /></svg>
+                      </span>
                       <span class="hr-text"><span class="hr-name">{{ c.title }}</span></span>
                     </button>
                   }
@@ -67,7 +69,13 @@ interface LessonHit {
                   <p class="hr-label">Lessons</p>
                   @for (l of lessonHits(); track l.id) {
                     <button type="button" role="option" (click)="openLessonHit(l)">
-                      <span class="hr-kind" aria-hidden="true">{{ l.kind === 'pdf' ? '📄' : '🎬' }}</span>
+                      <span class="hr-kind" aria-hidden="true">
+                        @if (l.kind === 'pdf') {
+                          <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
+                        } @else {
+                          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m10 9 5 3-5 3z" /></svg>
+                        }
+                      </span>
                       <span class="hr-text">
                         <span class="hr-name">{{ l.title }}</span>
                         <span class="hr-path">{{ l.course }}{{ l.section ? ' / ' + l.section : '' }}</span>

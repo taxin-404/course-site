@@ -32,7 +32,7 @@ type Tab = 'discussion' | 'notes' | 'resources';
 
         <div class="lp-notes" [hidden]="tab() !== 'notes'">
           <p class="lp-lock">
-            <span aria-hidden="true">🔒</span>
+            <svg class="lp-lock-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
             <span class="lp-lock-long">Your notes are private. Only you can see them.</span>
             <span class="lp-lock-short">Private to you</span>
           </p>

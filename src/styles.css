@@ -552,3 +552,21 @@ button.lr-link:hover:not(:disabled){background:transparent;box-shadow:none;text-
   .lr-form input,.lr-form button.p{grid-column:auto;width:100%}
   button.lr-del{width:44px;height:44px}
 }
+
+/* ===== Inline icon sizing (all icons are stroke SVGs, no glyphs) ===== */
+.back-btn{display:inline-flex;align-items:center;gap:.3rem}
+.back-btn svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.fb-icon svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.fb-done svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.done-btn svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.card-go{display:inline-flex;align-items:center;gap:.25rem}
+.card-go svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hr-kind{display:grid;place-items:center}
+.hr-kind svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.adm-close{display:inline-grid;place-items:center}
+.adm-close svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.dc-heart{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.dc-heart.filled{fill:currentColor}
+.dc-trash{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.lp-lock-ico{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lr-icon svg{width:17px;height:17px;fill:none;stroke:var(--acc);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
