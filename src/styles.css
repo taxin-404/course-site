@@ -182,6 +182,7 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
 /* PDF reader: fill the lesson area */
 .player-body:has(app-pdf-viewer){padding:0;overflow:hidden}
 app-pdf-viewer{display:flex;flex-direction:column;flex:1;min-height:0;height:100%}
+app-pdf-viewer.expanded{position:fixed;inset:0;z-index:1000;height:auto;background:var(--bg)}
 app-pdf-viewer .viewer-wrap{position:relative;flex:1;min-height:0}
 app-pdf-viewer .viewer-wrap ngx-extended-pdf-viewer{position:absolute;inset:0;height:100%}
 .notes-bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.35rem .8rem;border-bottom:1px solid var(--line);background:var(--panel);font-size:.82rem}
