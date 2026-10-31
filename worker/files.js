@@ -180,6 +180,45 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
   return json({ ok: true, moved: pairs.length });
 }
 
+// ---- Deleting ----
+
+// Replies are rows in `comments` with the same lesson, so one DELETE takes the whole thread.
+const LESSON_DELETES = [
+  'DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE lesson = ?)',
+  'DELETE FROM comments WHERE lesson = ?',
+  'DELETE FROM video_notes WHERE lesson = ?',
+  'DELETE FROM pdf_notes WHERE lesson = ?',
+  'DELETE FROM watched WHERE lesson = ?',
+  'DELETE FROM resources WHERE lesson = ?',
+];
+
+async function deleteEntry(env, rawPath, hooks) {
+  const p = cleanPath(rawPath);
+  if (p === null || !p) return bad('That name is not valid');
+
+  const single = await env.RESOURCES.head(p);
+  const objects = single ? [single] : await listAll(env, p + '/');
+  if (!objects.length) return bad('Not found', 404);
+  if (objects.length > 5000) return bad('That folder holds too many files to delete in one go', 413);
+
+  const keys = objects.map((o) => o.key);
+  const lessons = keys.filter(isLessonKey);
+
+  for (let i = 0; i < keys.length; i += 1000) await env.RESOURCES.delete(keys.slice(i, i + 1000));
+
+  const statements = lessons.flatMap((k) => LESSON_DELETES.map((sql) => env.DB.prepare(sql).bind(k)));
+  // A deleted course must not keep granting access to nothing.
+  if (!single && !p.includes('/')) statements.push(env.DB.prepare('DELETE FROM enrollments WHERE course = ?').bind(p));
+  try {
+    await runChunks(env, statements);
+  } catch (e) {
+    return bad('The files are gone, but their records could not be cleaned up: ' + (e && e.message ? e.message : e), 500);
+  }
+
+  hooks.invalidate();
+  return json({ ok: true, deleted: keys.length });
+}
+
 export async function handleFiles(req, env, path, method, url, hooks) {
   if (!path.startsWith('/api/admin/files')) return null;
 
@@ -192,6 +231,11 @@ export async function handleFiles(req, env, path, method, url, hooks) {
   if (path === '/api/admin/files/move' && method === 'POST') {
     const b = await req.json().catch(() => ({}));
     return moveEntry(env, b.from, b.to, hooks);
+  }
+
+  if (path === '/api/admin/files/delete' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return deleteEntry(env, b.path, hooks);
   }
 
   return bad('Not found', 404);
