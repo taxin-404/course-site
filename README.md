@@ -17,7 +17,7 @@ course-site/
     app/
       api.ts             API client and app state (signals)
       app.ts             Shell: header (logo, Admin panel toggle, Sign out)
-      login.ts           Sign-in form
+      login.ts           Sign-in form + Google button
       course.ts          Course sidebar, folder browser, lesson view, Mark as complete
       player.ts          Video player with moving email watermark
       pdf-viewer.ts      PDF reader (ngx-extended-pdf-viewer, toolbar trimmed)
@@ -49,7 +49,9 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - **The first admin comes from Cloudflare secrets** `ADMIN_EMAIL` and `ADMIN_PASSWORD`. The Worker creates it on the first request and always keeps it an admin. It is the **Owner**: it cannot be deleted or demoted in the panel. Changing `ADMIN_PASSWORD` later does *not* overwrite the stored password; use **Reset password** in the panel.
 - Admins see an **Admin panel** button in the header. In the panel they can add a user (optionally as admin), reset any password, grant or remove admin, and delete a user (their progress is removed too). Admins cannot delete or demote themselves.
 - Passwords must be 8+ characters; emails are validated and stored lowercase.
-- There is no self-signup. See `docs/PLAN-google-login.md` for the planned Google sign-in.
+- There is no self-signup. Users must be added by an admin first.
+- **Google sign-in (optional, invite-only):** set the variable `GOOGLE_CLIENT_ID` and the login page shows "Continue with Google". It only works for emails an admin already added; the first Google login links that account to the Google user ID. Admins can add a user as **Google only** (no password).
+- **Many users at once:** in the Admin panel, *Add many users* takes a pasted list or a `.csv`/`.txt` file of emails. *Google sign-in only* (default) adds hundreds instantly with no passwords; otherwise each user gets a generated password, shown once with Copy and Download CSV. Existing and invalid emails are skipped and reported. Setup steps: `docs/PLAN-google-login.md` section 1.
 
 ## Prepare and upload content
 
@@ -76,7 +78,7 @@ Option B, HLS (harder to save as a single file): `./tools/make-hls.sh videos hls
 1. Push this project to GitHub/GitLab with `wrangler.toml` at the repo root. Commit `package-lock.json`.
 2. Cloudflare dashboard, Workers & Pages: create a Worker from the repo. Set the **Deploy command** to `npm run deploy` (Angular build, then `wrangler deploy`). The Worker name must be `course-site`.
 3. If the build complains about Node, add a build variable `NODE_VERSION` = `22` (Angular 21 needs Node 20.19+ or 22.12+).
-4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters), `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Redeploy so the Worker sees them.
+4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters), `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Optional: variable `GOOGLE_CLIENT_ID` for Google sign-in. Redeploy so the Worker sees them.
 5. Open the site and sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, then use **Admin panel** to add students.
 
 The D1 database and R2 bucket are created automatically on first deploy; tables are created on the first request.
@@ -121,12 +123,15 @@ About $0.015/GB-month on R2 with free egress (60 GB is roughly $0.75-$1/month). 
 | Endpoint | Access | Purpose |
 | --- | --- | --- |
 | `POST /api/login`, `/api/logout` | public | Session cookie |
+| `GET /api/config` | public | `{googleClientId}` (empty when not configured) |
+| `POST /api/login/google` | public | `{credential}` Google ID token; invite-only |
 | `GET /api/me` | signed in | Current user (`id, email, is_admin`) |
 | `GET /api/course` | signed in | `[{title, sections:[{title, lessons:[{id,title,kind,done}]}]}]` from the bucket |
 | `GET /api/media/<key>` | signed in | Playlist, segment, video or PDF (range requests supported) |
 | `POST /api/progress` | signed in | `{lesson, done}` |
 | `GET /api/admin/users` | admin | List users with role and lessons done |
-| `POST /api/admin/users` | admin | Add a user `{email, password, is_admin?}` |
+| `POST /api/admin/users` | admin | Add a user `{email, password, is_admin?, google_only?}` |
+| `POST /api/admin/users/bulk` | admin | `{emails[], google_only?, is_admin?}`; up to 500 emails Google-only, or 20 with generated passwords per request; returns `{added, skipped}` |
 | `POST /api/admin/users/<id>/password` | admin | Reset password `{password}` |
 | `POST /api/admin/users/<id>/role` | admin | `{is_admin}`; not for the Owner or yourself |
 | `DELETE /api/admin/users/<id>` | admin | Delete user and progress; not the Owner or yourself |
