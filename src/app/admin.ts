@@ -193,14 +193,22 @@ const ROLES: { key: RoleFilter; label: string }[] = [
 
           <section class="adm-sec">
             <h4>Actions</h4>
-            <div class="adm-stack">
-              <button type="button" (click)="openReset(u)">Reset password</button>
-              @if (!u.owner && u.id !== api.me()?.id) {
-                <button type="button" (click)="toggleRole(u)">{{ u.is_admin ? 'Remove admin' : 'Make admin' }}</button>
-                <button type="button" class="d" (click)="askDelete(u)">Delete user</button>
-              }
-            </div>
-            <p class="adm-muted sm">Resetting a password or changing a role signs the user out everywhere.</p>
+            @if (u.owner) {
+              <p class="adm-muted sm">
+                The Owner is managed by Cloudflare secrets, not in this panel: it always signs in with
+                Google, and <code>ADMIN_PASSWORD</code> (optional) is its password. It cannot be renamed,
+                demoted or deleted here.
+              </p>
+            } @else {
+              <div class="adm-stack">
+                <button type="button" (click)="openReset(u)">Reset password</button>
+                @if (u.id !== api.me()?.id) {
+                  <button type="button" (click)="toggleRole(u)">{{ u.is_admin ? 'Remove admin' : 'Make admin' }}</button>
+                  <button type="button" class="d" (click)="askDelete(u)">Delete user</button>
+                }
+              </div>
+              <p class="adm-muted sm">Resetting a password or changing a role signs the user out everywhere.</p>
+            }
           </section>
         </div>
       </aside>

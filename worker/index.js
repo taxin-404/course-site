@@ -446,6 +446,9 @@ const handle = async (req, env) => {
           const t = await env.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(id).first();
           if (!t) return json({ error: 'User not found' }, 404);
           if (mm[2] === 'password' && m === 'POST') {
+            // The Owner's credentials live in Cloudflare secrets, not in the panel: another
+            // admin resetting it would be able to sign in as the Owner.
+            if (isOwner(env, t.email)) return json({ error: 'The Owner password comes from the ADMIN_PASSWORD secret' }, 400);
             const b = await req.json();
             if (!validPw(b.password)) return json({ error: 'Password must be 8+ characters' }, 400);
             await env.DB.prepare('UPDATE users SET pass = ?, ver = ver + 1 WHERE id = ?').bind(await hashPw(b.password), id).run();

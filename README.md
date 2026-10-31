@@ -49,7 +49,7 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 ## Accounts and the Admin panel
 
 - **The Owner comes from the Cloudflare secret `ADMIN_EMAIL`.** The Worker creates that account on the first request (as an admin) and always keeps it an admin, so that address can sign in with **Google** straight away — the first Google login links the account by matching the verified email. It cannot be deleted or demoted in the panel.
-- `ADMIN_PASSWORD` is optional and takes effect whenever it changes: set it and the Owner can also sign in with email + password; remove the secret and the stored password is replaced by an unusable marker, so only Google works. The password never has to be reset in the panel.
+- `ADMIN_PASSWORD` is optional and takes effect whenever it changes: set it and the Owner can also sign in with email + password; remove the secret and the stored password is replaced by an unusable marker, so only Google works. Because of that, the Owner's password cannot be changed from the Admin panel (no other admin can reset it and sign in as the Owner) — change the secret instead.
 - Admins see an **Admin panel** button in the header. In the panel they can add a user (optionally as admin), reset any password, grant or remove admin, and delete a user (their progress is removed too). Admins cannot delete or demote themselves.
 - Passwords must be 8+ characters; emails are validated and stored lowercase.
 - There is no self-signup. Users must be added by an admin first.
