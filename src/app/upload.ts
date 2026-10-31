@@ -49,6 +49,9 @@ export class Uploader {
   private nextId = 1;
   // One job can have several part PUTs in flight, so each one is tracked separately.
   private readonly inflight = new Map<number, Set<XMLHttpRequest>>();
+  // Cancelling only aborts the requests that already exist. The start/sign calls and the
+  // part loop are async, so they also check this set and stop themselves.
+  private readonly cancelled = new Set<number>();
 
   constructor(private readonly api: Api, private readonly changed: () => void) {
     // A reload leaves an unfinished multipart upload behind. Show it as paused so the
@@ -101,6 +104,7 @@ export class Uploader {
   }
 
   cancel(id: number): void {
+    this.cancelled.add(id);
     for (const xhr of this.inflight.get(id) ?? []) xhr.abort();
     this.inflight.delete(id);
     const job = this.get(id);
@@ -114,6 +118,8 @@ export class Uploader {
   }
 
   dispose(): void {
+    // The view is gone, so every running job must stop creating new requests too.
+    for (const job of this.jobs()) this.cancelled.add(job.id);
     for (const set of this.inflight.values()) for (const xhr of set) xhr.abort();
     this.inflight.clear();
   }
@@ -126,6 +132,7 @@ export class Uploader {
     try {
       if (file.size <= SINGLE_MAX) await this.single(id, job, file, overwrite);
       else await this.multi(id, job, file, overwrite);
+      this.stopIfCancelled(id);
       this.patch(id, { state: 'done', loaded: file.size, error: '' });
       this.storeDrop(job);
       this.changed();
@@ -137,14 +144,18 @@ export class Uploader {
       }
       if (e instanceof DOMException && e.name === 'AbortError') return;
       this.fail(id, e instanceof Error ? e.message : String(e));
+    } finally {
+      this.cancelled.delete(id);
     }
   }
 
   private async single(id: number, job: UploadJob, file: File, overwrite: boolean): Promise<void> {
     const { url } = await this.api.uploadUrl(job.key, file.size, overwrite);
+    this.stopIfCancelled(id);
     await this.put(id, url, file, (loaded) => this.patch(id, { loaded }));
     // A single PUT finishes without a Worker round trip; this drops the course cache.
     await this.api.uploadDone(job.key);
+    this.stopIfCancelled(id);
   }
 
   private async multi(id: number, job: UploadJob, file: File, overwrite: boolean): Promise<void> {
@@ -153,57 +164,76 @@ export class Uploader {
     const parts: UploadPart[] = [];
     let uploadId = '';
     let base = 0;
+    let completed = false;
 
-    const rec = this.storeFind(job);
-    if (rec) {
-      try {
-        const listed = await this.api.uploadParts(job.key, rec.uploadId);
-        uploadId = rec.uploadId;
-        for (const p of listed.parts) {
-          parts.push({ partNumber: p.partNumber, etag: p.etag });
-          base += p.size ?? (p.partNumber < total ? size : file.size - (total - 1) * size);
-        }
-        if (listed.parts.length) this.patch(id, { loaded: base, error: 'Resuming the earlier upload.' });
-      } catch (e) {
-        if (e instanceof ApiError && (e.status === 404 || e.status === 410)) {
-          // R2 no longer has the upload (expired or aborted): start a fresh one.
-          this.storeDrop(job);
-          this.patch(id, { error: 'The earlier upload expired, so this one starts over.' });
-        } else {
-          throw e;
+    try {
+      const rec = this.storeFind(job);
+      if (rec) {
+        try {
+          const listed = await this.api.uploadParts(job.key, rec.uploadId);
+          uploadId = rec.uploadId;
+          for (const p of listed.parts) {
+            parts.push({ partNumber: p.partNumber, etag: p.etag });
+            base += p.size ?? (p.partNumber < total ? size : file.size - (total - 1) * size);
+          }
+          if (listed.parts.length) this.patch(id, { loaded: base, error: 'Resuming the earlier upload.' });
+        } catch (e) {
+          if (e instanceof ApiError && (e.status === 404 || e.status === 410)) {
+            // R2 no longer has the upload (expired or aborted): start a fresh one.
+            this.storeDrop(job);
+            this.patch(id, { error: 'The earlier upload expired, so this one starts over.' });
+          } else {
+            throw e;
+          }
         }
       }
-    }
 
-    if (!uploadId) {
-      const started = await this.api.uploadStart(job.key, file.size, overwrite);
-      uploadId = started.uploadId;
-      this.storeSave(job, uploadId);
-      parts.length = 0;
-      base = 0;
-    }
-
-    const have = new Set(parts.map((p) => p.partNumber));
-    const missing: number[] = [];
-    for (let n = 1; n <= total; n++) if (!have.has(n)) missing.push(n);
-
-    let next = 0;
-    const workers = Array.from({ length: Math.min(CONCURRENCY, missing.length) }, async () => {
-      while (next < missing.length) {
-        const n = missing[next++];
-        const start = (n - 1) * size;
-        const blob = file.slice(start, Math.min(start + size, file.size));
-        const { url } = await this.api.uploadPartUrl(job.key, uploadId, n);
-        const etag = await this.putPart(id, url, blob, (loaded) => this.patch(id, { loaded: base + loaded }));
-        parts.push({ partNumber: n, etag });
-        base += blob.size;
-        this.patch(id, { loaded: base });
+      this.stopIfCancelled(id);
+      if (!uploadId) {
+        const started = await this.api.uploadStart(job.key, file.size, overwrite);
+        uploadId = started.uploadId;
+        // Cancelled while the start request was in flight: drop the upload before any
+        // part is sent, otherwise it finishes in the background after the row is gone.
+        this.stopIfCancelled(id);
+        this.storeSave(job, uploadId);
+        parts.length = 0;
+        base = 0;
       }
-    });
-    await Promise.all(workers);
 
-    parts.sort((a, b) => a.partNumber - b.partNumber);
-    await this.api.uploadComplete(job.key, uploadId, parts);
+      const have = new Set(parts.map((p) => p.partNumber));
+      const missing: number[] = [];
+      for (let n = 1; n <= total; n++) if (!have.has(n)) missing.push(n);
+
+      let next = 0;
+      const workers = Array.from({ length: Math.min(CONCURRENCY, missing.length) }, async () => {
+        while (next < missing.length) {
+          this.stopIfCancelled(id);
+          const n = missing[next++];
+          const start = (n - 1) * size;
+          const blob = file.slice(start, Math.min(start + size, file.size));
+          const { url } = await this.api.uploadPartUrl(job.key, uploadId, n);
+          this.stopIfCancelled(id);
+          const etag = await this.putPart(id, url, blob, (loaded) => this.patch(id, { loaded: base + loaded }));
+          parts.push({ partNumber: n, etag });
+          base += blob.size;
+          this.patch(id, { loaded: base });
+        }
+      });
+      await Promise.all(workers);
+
+      this.stopIfCancelled(id);
+      parts.sort((a, b) => a.partNumber - b.partNumber);
+      await this.api.uploadComplete(job.key, uploadId, parts);
+      completed = true;
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError' && uploadId && !completed) {
+        // Also drop the parts R2 kept; a failure here only leaves storage behind until
+        // the bucket lifecycle rule removes it.
+        void this.api.uploadAbort(job.key, uploadId).catch(() => {});
+        this.storeDrop(job);
+      }
+      throw e;
+    }
   }
 
   private put(id: number, url: string, body: Blob, onProgress: (loaded: number) => void): Promise<void> {
@@ -256,6 +286,10 @@ export class Uploader {
     if (!set) return;
     set.delete(xhr);
     if (!set.size) this.inflight.delete(id);
+  }
+
+  private stopIfCancelled(id: number): void {
+    if (this.cancelled.has(id)) throw new DOMException('Aborted', 'AbortError');
   }
 
   private get(id: number): UploadJob | undefined {

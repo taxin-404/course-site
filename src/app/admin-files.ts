@@ -114,9 +114,12 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
               <button type="button" class="files-tool" title="Rename" aria-label="Rename folder" (click)="askRename(d.name, d.path, 'folder')">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
               </button>
-              <button type="button" class="files-tool" title="Move" aria-label="Move folder" (click)="askMove(d.path, 'folder')">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6h6l2 2h8v12H4z" /><path d="m10 14 4-4 4 4" /><path d="M14 10v6" /></svg>
-              </button>
+              @if (d.path.includes('/')) {
+                <!-- A top-level folder is a course, and a course can only be renamed. -->
+                <button type="button" class="files-tool" title="Move" aria-label="Move folder" (click)="askMove(d.path, 'folder')">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6h6l2 2h8v12H4z" /><path d="m10 14 4-4 4 4" /><path d="M14 10v6" /></svg>
+                </button>
+              }
               <button type="button" class="files-tool danger" title="Delete" aria-label="Delete folder" (click)="askDelete(d.name, d.path, 'folder')">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
               </button>
