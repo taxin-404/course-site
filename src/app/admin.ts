@@ -1,5 +1,6 @@
 import { Component, computed, inject, signal, OnInit } from '@angular/core';
 import { Api, AdminUser, BulkResult } from './api';
+import { AdminFiles } from './admin-files';
 
 type SortKey = 'email' | 'progress' | 'courses';
 type RoleFilter = 'all' | 'student' | 'admin';
@@ -35,19 +36,30 @@ const MODES: { key: CourseMode; label: string }[] = [
       <div class="adm-top">
         <div>
           <h1>Admin</h1>
-          <p class="adm-sub">Search and filter below; the matching users are listed underneath.</p>
+          <p class="adm-sub">{{ view() === 'files' ? 'Upload, rename, move and delete course files.' : 'Search and filter below; the matching users are listed underneath.' }}</p>
         </div>
         <div class="adm-top-actions">
-          <button type="button" class="adm-ico" title="Refresh" aria-label="Refresh list" [disabled]="loading()" (click)="refresh()">
-            <svg [class.spinning]="loading()" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7L21 8" />
-              <path d="M21 3v5h-5" />
+          <button type="button" class="adm-ico wide" [class.on]="view() === 'files'" [attr.aria-pressed]="view() === 'files'" [title]="view() === 'files' ? 'Back to users' : 'Course files'" (click)="toggleView()">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2.5h5A2.5 2.5 0 0 1 20 10v7.5A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z" />
             </svg>
+            <span>Files</span>
           </button>
-          <button type="button" class="p" (click)="openAdd()">+ Add users</button>
+          @if (view() === 'users') {
+            <button type="button" class="adm-ico" title="Refresh" aria-label="Refresh list" [disabled]="loading()" (click)="refresh()">
+              <svg [class.spinning]="loading()" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+            </button>
+            <button type="button" class="p" (click)="openAdd()">+ Add users</button>
+          }
         </div>
       </div>
 
+      @if (view() === 'files') {
+        <app-admin-files />
+      } @else {
       <!-- Overview -->
       <section class="adm-stats" aria-label="Overview">
         <div class="stat"><b>{{ users().length }}</b><span>Users</span></div>
@@ -185,6 +197,7 @@ const MODES: { key: CourseMode; label: string }[] = [
           }
         }
       </section>
+      }
     </main>
 
     <!-- Detail drawer -->
@@ -417,9 +430,14 @@ const MODES: { key: CourseMode; label: string }[] = [
       }
     </div>
   `,
+  imports: [AdminFiles],
 })
 export class Admin implements OnInit {
   protected readonly api = inject(Api);
+
+  /** Which screen this panel shows. Admin-only either way. */
+  protected readonly view = signal<'users' | 'files'>('users');
+  protected toggleView(): void { this.view.update((v) => (v === 'files' ? 'users' : 'files')); }
 
   protected readonly users = signal<AdminUser[]>([]);
   protected readonly loading = signal(true);
