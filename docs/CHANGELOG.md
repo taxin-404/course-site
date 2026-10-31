@@ -1,7 +1,18 @@
 # Changelog
 
 ## Unreleased
-### Added
+### Added (courses, notes, theme)
+- Multi-course access: `enrollments` table, `GET /api/admin/courses`, `POST /api/admin/users/<id>/courses`, `courses` on add/bulk add, course checkboxes in the Admin panel. Existing students keep every current course on first deploy.
+- Worker checks the course on `/api/course`, `/api/media/*` and `/api/notes/*`.
+- Course cards home screen and a sidebar folder tree (open/close, done counts, search, remembers open folders, expands to the current lesson).
+- Private PDF notes: `pdf_notes` table, `GET/PUT/DELETE /api/notes/<key>`, auto-save, Hide my notes, Reset to original, full-window mode, all viewer tools except download and print.
+- Color palette (`#202734`, `#36415A`, `#B7D894`, `#E0F8C7`) for dark mode, with a derived light mode.
+
+### Security (courses and notes)
+- Download is locked off in the PDF viewer (`supportsDownloading=false`, buttons hidden, Ctrl/Cmd+S and +P blocked).
+- Notes are scoped to the signed-in user in every query.
+
+### Added (earlier)
 - Admin panel (`src/app/admin.ts`): list users, add user (optionally admin), reset password, grant/remove admin, delete user.
 - Admin endpoints: `GET/POST /api/admin/users`, `POST /api/admin/users/<id>/password|role`, `DELETE /api/admin/users/<id>`.
 - First admin (Owner) seeded from Cloudflare secrets `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
