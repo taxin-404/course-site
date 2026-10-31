@@ -11,6 +11,8 @@ course-site/
   wrangler.toml          Worker config; serves the built Angular app from dist/web/browser
   package.json           Angular + wrangler; `npm run deploy` builds then deploys
   worker/index.js        API, auth, admin, course listing, media streaming (the Worker)
+  worker/files.js        File manager API: listing, folders, move/rename, delete, upload handshake
+  worker/s3.js           R2 S3 signing (aws4fetch): server calls and presigned browser PUTs
   src/
     styles.css           All styling: tokens, light/dark, desktop + phone layouts
     curse-of-the-zombie.ttf   Logo font (bundled by the build; see License note)
@@ -22,6 +24,8 @@ course-site/
       player.ts          Video player with moving email watermark
       pdf-viewer.ts      PDF reader with private notes, hide/reset and full-window mode (download and print stay off)
       admin.ts           Admin panel: list/add/reset password/promote/delete users, give courses
+      admin-files.ts     File manager view: folder tree, rename/move/delete, new folder, uploads
+      upload.ts          Uploader: presigned parts, progress, resume after a reload
   tools/make-hls.sh      Optional: converts videos to HLS and copies PDFs
   docs/HANDOFF.md        How it was built, what is verified, limits, backlog
   docs/PLAN-google-login.md   Google sign-in plan (implemented)
@@ -44,13 +48,14 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - Files = **lessons**. Video: `.mp4 .webm .mkv .mov .avi .m4v .m3u8`. Documents: `.pdf`. HLS segments (`.ts`) are hidden from the list.
 - For an HLS lesson, the title is its parent folder name (`<Lesson>/index.m3u8`).
 - Names sort naturally, so prefix with `01`, `02`. New uploads appear within about a minute (the listing is cached 60 s per Worker instance).
-- Progress is stored by object key, so renaming a file or folder resets that lesson's progress.
+- Progress, comments, notes and resources are stored by object key. Rename or move through **Admin panel → Files** and they follow; renaming with rclone or the dashboard does not.
 
 ## Accounts and the Admin panel
 
 - **The Owner comes from the Cloudflare secret `ADMIN_EMAIL`.** The Worker creates that account on the first request (as an admin) and always keeps it an admin, so that address can sign in with **Google** straight away — the first Google login links the account by matching the verified email. It cannot be deleted or demoted in the panel.
 - `ADMIN_PASSWORD` is optional and takes effect whenever it changes: set it and the Owner can also sign in with email + password; remove the secret and the stored password is replaced by an unusable marker, so only Google works. Because of that, the Owner's password cannot be changed from the Admin panel (no other admin can reset it and sign in as the Owner) — change the secret instead.
 - Admins see an **Admin panel** button in the header. In the panel they can add a user (optionally as admin), reset any password, grant or remove admin, and delete a user (their progress is removed too). Admins cannot delete or demote themselves.
+- The **Files** button at the top right opens the file manager (below).
 - Passwords must be 8+ characters; emails are validated and stored lowercase.
 - There is no self-signup. Users must be added by an admin first.
 - **Google sign-in (optional, invite-only):** set the variable `GOOGLE_CLIENT_ID` and the login page shows "Continue with Google". It only works for emails an admin already added; the first Google login links that account to the Google user ID. Admins can add a user as **Google only** (no password).
@@ -62,7 +67,7 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - Admin panel: tick **Courses for new users** before adding one or many users, or use the **Courses** button on a student's row to change it later.
 - On the first request after this feature is deployed, every existing student is given every current course, so nobody loses access. After that, access is exactly what the admin sets.
 - Payment is manual for now: the student pays you (for example bKash or Nagad), then you give the course in the Admin panel.
-- Access is tied to the **folder name**. Renaming a course folder in R2 removes access to it (and resets progress).
+- Access is tied to the **folder name**. Renaming a course in **Admin panel → Files** moves the enrollments with it; renaming it in R2 does not.
 - Home screen: course cards with progress (a student with one course goes straight in). Inside a course the sidebar shows the folder tree: folders open and close at any depth, show done/total, expand to the open lesson, remember what was open, and a search box filters lessons.
 
 ## PDF notes
@@ -73,9 +78,21 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - Limit: about 1.5 MB of notes per PDF (large stamp images can hit it).
 - **Download stays off, always:** download/save buttons are removed, `supportsDownloading` is `false`, `Ctrl/Cmd+S` and `Ctrl/Cmd+P` are blocked, and print and open-file are off. Do not enable them.
 
+## File manager (Admin panel → Files)
+
+Everything the owner needs for day-to-day content work, without `rclone`:
+
+- **Upload:** pick files or drag them onto the open folder. Small files (up to 16 MiB) go in one request; larger ones are split into 8 MiB parts sent in parallel, and the browser uploads them **straight to R2** with URLs the Worker signs, so a multi-gigabyte video costs the Worker nothing. A name that already exists is refused; choose **Replace** if you mean to overwrite.
+- **Reload mid-upload:** the row shows *Paused — re-select the file*. Choose the same file and only the missing parts are sent. If R2 has already dropped the upload, it starts over and says so.
+- **Rename / move:** a lesson keeps its comments, notes, progress and resources; a course rename also keeps its students' access. A folder cannot be moved inside itself, a lesson cannot be renamed to something the site will not show, and an existing destination is never overwritten.
+- **Delete:** removes the file and its student data; deleting a course also removes its enrollments. Deleting a file cannot be undone, and folders require typing the name to confirm.
+- **New folder:** a folder at the top level is a course. An empty folder is held by a hidden zero-byte `.keep`.
+
+Uploads need four Worker secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, optional `R2_BUCKET`) and a bucket CORS rule that exposes `ETag`; both are covered under Deploy. An R2 lifecycle rule on `course-sourse` aborts incomplete multipart uploads after 7 days, so an abandoned upload does not keep paying for parts.
+
 ## Prepare and upload content
 
-Upload with `rclone` (not through git; the dashboard and Wrangler stop at 300 MB per file).
+For everyday additions use **Admin panel → Files** (above). For bulk imports, upload with `rclone` (not through git; the dashboard and Wrangler stop at 300 MB per file).
 
 ```bash
 rclone config update r2 \
@@ -98,7 +115,7 @@ Option B, HLS (harder to save as a single file): `./tools/make-hls.sh videos hls
 1. Push this project to GitHub/GitLab with `wrangler.toml` at the repo root. Commit `package-lock.json`.
 2. Cloudflare dashboard, Workers & Pages: create a Worker from the repo. Set the **Deploy command** to `npm run deploy` (Angular build, then `wrangler deploy`). The Worker name must be `course-site`.
 3. If the build complains about Node, add a build variable `NODE_VERSION` = `22` (Angular 21 needs Node 20.19+ or 22.12+).
-4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters) and `ADMIN_EMAIL` (the Owner, e.g. your Gmail). `ADMIN_PASSWORD` is optional — add it only if the Owner should also be able to sign in with a password. Set `GOOGLE_CLIENT_ID` for Google sign-in. Redeploy so the Worker sees them.
+4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters) and `ADMIN_EMAIL` (the Owner, e.g. your Gmail). `ADMIN_PASSWORD` is optional — add it only if the Owner should also be able to sign in with a password. Set `GOOGLE_CLIENT_ID` for Google sign-in. For in-app uploads add `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `course-sourse`) and optionally `R2_BUCKET`. Redeploy so the Worker sees them, and add the bucket CORS rule listed in `docs/SECURITY.md` (the browser uploads directly to R2).
 5. Open the site and sign in as the Owner with **Continue with Google** (or `ADMIN_EMAIL` / `ADMIN_PASSWORD` if you set the password), then use **Admin panel** to add students.
 
 The D1 database and R2 bucket are created automatically on first deploy; tables are created on the first request.
@@ -109,7 +126,7 @@ If the site shows an old version after a push, check the **Builds** tab: a faile
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars     # set SESSION_SECRET, ADMIN_EMAIL (ADMIN_PASSWORD optional)
+cp .dev.vars.example .dev.vars     # set SESSION_SECRET, ADMIN_EMAIL (ADMIN_PASSWORD optional; R2_* for uploads)
 npm run build                      # once: the Worker needs dist/ to exist
 npm run api                        # terminal 1: Worker on :8787 (local D1 + R2)
 npm start                          # terminal 2: Angular on :4200, proxies /api to :8787

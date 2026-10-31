@@ -1,6 +1,6 @@
 # Handoff: how this project was built and where it stands
 
-For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the admin panel, UI redesign and mobile pass.
+For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the file manager (uploads, rename, move, delete, folders), the admin panel, UI redesign and mobile pass.
 
 ## 1. Goal and requirements
 
@@ -24,6 +24,10 @@ A private video course site for a small cohort (about 6 students, growing to a f
 | HLS supported, MP4 also served | The Worker lists and serves both. HLS (`tools/make-hls.sh`) avoids a single downloadable file; plain MP4 is simpler to upload. The old `ALLOW_MP4` switch was removed from the code, so MP4 is always served. |
 | Session cookie, not signed URLs | Media URLs only work with a valid `HttpOnly` cookie, so copied links are useless. |
 | Course structure derived from the bucket | No lesson table. Uploading files is the only content step. Top folder = course, sub-folders = folders, files = lessons. |
+| File manager inside the Admin panel | The owner needed uploads, renames, moves, deletes and folders without rclone. It works on R2 keys directly and carries the D1 rows in the same operation. |
+| Uploads go browser → R2 with presigned S3 URLs | A Worker request body is capped (about 100 MB), so large videos cannot pass through it. The Worker only signs each part; the bytes go straight to the bucket. |
+| Moves copy through the R2 binding, then rewrite D1, then delete | Avoids S3's 5 GiB copy ceiling and works against the local bucket in dev. A retry is safe: an identical copy at the target is treated as already done. |
+| Binding renamed `VIDEOS` → `RESOURCES` | It now holds PDFs and arbitrary files too. The bucket name `course-sourse` is unchanged (R2 buckets cannot be renamed). |
 | D1 for users and progress only | Small relational data; progress keyed by R2 object key. |
 | Schema created lazily by the Worker | The Git deploy has no place to run migrations before the database exists. `CREATE TABLE IF NOT EXISTS` runs once per isolate. |
 | `wrangler.toml` bindings without IDs | Cloudflare provisions the D1 database and R2 bucket on the first Git deploy. Bucket is named `course-sourse` (spelling kept on purpose). |
@@ -44,8 +48,9 @@ Browser (Angular SPA)
    v
 Cloudflare Worker  (worker/index.js)
    |-- static assets: dist/web/browser   (served directly; Worker only runs for /api/*)
-   |-- D1  binding DB      users, watched
-   '-- R2  binding VIDEOS  <Course>/<Folder>/.../<file>
+   |-- D1  binding DB         users, progress, comments, notes, resources, enrollments
+   |-- R2  binding RESOURCES  <Course>/<Folder>/.../<file>
+   '-- R2 S3 API (signed)     the browser's upload parts go straight here
 ```
 
 `wrangler.toml` uses `run_worker_first = ["/api/*"]`.
@@ -54,14 +59,18 @@ Cloudflare Worker  (worker/index.js)
 
 | Path | Purpose |
 | --- | --- |
-| `worker/index.js` | Entire backend: auth, admin seeding and endpoints, course listing, media streaming, progress |
+| `worker/index.js` | Backend entry: auth, admin seeding and endpoints, course listing, media streaming, progress; dispatches `/api/admin/files*` to `files.js` |
+| `worker/files.js` | File manager API: listing, create folder, move/rename, delete, and the upload handshake (start/part/url/complete/abort/parts) |
+| `worker/s3.js` | R2 S3 signing with `aws4fetch`: `r2Config`, server calls (`s3Fetch`) and presigned browser PUTs (`presign`) |
 | `src/app/api.ts` | `Api` service: fetch wrapper (GET/POST/DELETE) and app state signals (`me`, `courses`); user-admin calls |
 | `src/app/app.ts` | Root: header (logo, Admin panel toggle, Sign out), switches course/admin views |
 | `src/app/login.ts` | Sign-in form |
 | `src/app/course.ts` | Course cards (home), sidebar folder tree with search, folder browser with breadcrumb, lesson view, Mark as complete |
 | `src/app/player.ts` | Video element + moving email watermark (native controls) |
 | `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), full-window mode, download/print locked off |
-| `src/app/admin.ts` | Admin panel UI, including course checkboxes |
+| `src/app/admin.ts` | Admin panel UI (users and course checkboxes) with a Files/Users toggle |
+| `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop |
+| `src/app/upload.ts` | Uploader: part sizing, presigned PUTs, 3 parallel parts, progress, conflict/retry, resume from `localStorage` after a reload |
 | `src/styles.css` | All styling and the bundled logo font |
 | `src/curse-of-the-zombie.ttf` | Logo font (capitals only; CSS uppercases the logo) |
 | `angular.json` | Copies `public/` and the pdf viewer's `assets/` into the build |
@@ -76,7 +85,14 @@ users   (id INTEGER PK, email TEXT UNIQUE, pass TEXT, is_admin INTEGER, google_s
 watched (user_id INTEGER, lesson TEXT, PRIMARY KEY (user_id, lesson))      -- lesson = R2 object key
 pdf_notes (user_id INTEGER, lesson TEXT, data TEXT, updated INTEGER, PRIMARY KEY (user_id, lesson))   -- data = JSON array of serialized editor annotations (max 1.5 MB)
 enrollments (user_id INTEGER, course TEXT, PRIMARY KEY (user_id, course))   -- course = first R2 folder name; created in migrate(), which grants all current courses to existing users once
+comments (id INTEGER PK, lesson TEXT, user_id INTEGER, parent_id INTEGER, body TEXT, created INTEGER)   -- lesson = R2 key; replies share the lesson and point at parent_id
+comment_likes (comment_id INTEGER, user_id INTEGER, PRIMARY KEY (comment_id, user_id))
+video_notes (user_id INTEGER, lesson TEXT, body TEXT, updated INTEGER, PRIMARY KEY (user_id, lesson))
+resources (id INTEGER PK, lesson TEXT, title TEXT, url TEXT, note TEXT, created_by INTEGER, created INTEGER)
+attempts (k TEXT PRIMARY KEY, n INTEGER, t INTEGER)   -- login throttling
 ```
+
+Every lesson-shaped table is keyed by the R2 object key. The file manager keeps them attached: a rename/move rewrites `lesson` in `comments`, `video_notes`, `pdf_notes`, `watched` and `resources` in the same operation, a course rename also rewrites `enrollments.course`, and a delete removes all of a lesson's rows (a course delete also removes its enrollments).
 
 ### API
 
@@ -98,12 +114,22 @@ enrollments (user_id INTEGER, course TEXT, PRIMARY KEY (user_id, course))   -- c
 | `POST /api/admin/users/<id>/password` | admin | Reset password |
 | `POST /api/admin/users/<id>/role` | admin | `{is_admin}`; blocked for the Owner and yourself |
 | `DELETE /api/admin/users/<id>` | admin | Deletes user and their `watched` rows; blocked for the Owner and yourself |
+| `GET /api/admin/files?prefix=` | admin | One folder: `{path, dirs:[{name,path}], files:[{key,name,size,modified,lesson,hls}]}`; `.keep` and `.ts` hidden; sorted naturally |
+| `POST /api/admin/files/folder` | admin | `{path}`; creates `<path>/.keep`; `409` if the folder exists |
+| `POST /api/admin/files/move` | admin | `{from, to, kind:'file'|'folder'}`; copies, rewrites the D1 rows, then deletes the originals; `409` on an existing target, `400` on a lesson becoming a non-lesson or a folder moving inside itself |
+| `POST /api/admin/files/delete` | admin | `{path, kind}`; deletes objects first, then the D1 rows; a course delete also removes enrollments |
+| `POST /api/admin/files/upload/start` | admin | `{key, size, overwrite?}` → `{uploadId}`; `409` if the key exists and `overwrite` is false |
+| `POST /api/admin/files/upload/part` | admin | `{key, uploadId, partNumber}` → `{url}`, a presigned PUT that expires in 1 hour |
+| `POST /api/admin/files/upload/url` | admin | `{key, size, overwrite?}` → `{url}` for files up to 16 MiB (one PUT) |
+| `POST /api/admin/files/upload/complete` | admin | `{key, uploadId, parts:[{partNumber, etag}]}`; completes the multipart upload |
+| `POST /api/admin/files/upload/abort` | admin | `{key, uploadId}`; drops the parts R2 kept |
+| `GET /api/admin/files/upload/parts?key=&uploadId=` | admin | Lists the parts already in R2, so a reload sends only the missing ones; `404` when the upload expired |
 
-Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Variable: `GOOGLE_CLIENT_ID` (public; enables Google sign-in).
+Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and the four upload values `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` (the API token needs Object Read & Write on `course-sourse`). Variable: `GOOGLE_CLIENT_ID` (public; enables Google sign-in). Without the `R2_*` secrets everything else works and only uploads answer `503`.
 
 ### Course discovery (`listCourse`)
 
-1. List all R2 keys (paginated, 1000 per call); cached in memory for 60 s per isolate.
+1. List all R2 keys (paginated, 1000 per call); cached in memory for 60 s per isolate. Every file-manager change calls `invalidateCourse()`, so the site reflects it at once.
 2. Keep videos (`mp4 webm mkv mov avi m4v m3u8`) and `.pdf`; skip `.ts` segments and root-level files.
 3. Course = first path segment. Section = remaining directories joined by `" / "` (empty = course root).
 4. `.m3u8` lessons are titled by their parent folder; others by file name without extension.
@@ -154,6 +180,19 @@ Not verified (treat as unknown):
 
 See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 per email+IP, 40 per IP, 15 min), `users.ver` session version (bumped on password reset and role change; cookie carries `v`), Origin/Sec-Fetch CSRF check, security headers on API responses, media gate (`mediaRequestOk`: needs `Sec-Fetch-Site: same-origin` and media dest) and per-user distinct-lesson cap (`scraping`, in-memory per instance, admins exempt). `public/_headers` adds headers and a report-only CSP for the static pages. Also `serve()` requires a `Range` header for video files, truncates each answer to 4 MB (`CHUNK`) and delays requests above `MAX_MBPS` per student (`reserve()`, in-memory leaky bucket; 429 if the delay would exceed 25 s). Not verified against a real browser/deploy (including whether FetchV is actually slowed): the CSP (report-only, check the console), and iOS/Safari native HLS with the Sec-Fetch gate (`RELAX_FETCH_METADATA=1` is the escape hatch).
 
+## 4c. File manager (added later)
+
+- Admin panel → **Files** toggles between users and the course tree. Folders are key prefixes: the tree lists `env.RESOURCES.list({prefix, delimiter:'/'})`; an empty folder is held by a hidden zero-byte `.keep`. A folder at the top level is a course.
+- **Uploads:** pick or drag files onto the open folder. Files up to 16 MiB use one presigned PUT; larger files use multipart with 8 MiB parts (scaled up so 10,000 is never exceeded), 3 parts in parallel, progress per file. The browser PUTs straight to R2; the Worker only signs. `XMLHttpRequest` is used because `fetch` cannot report upload progress. An existing name is refused with a **Replace** choice.
+- **Reload mid-upload:** the upload id and size are kept in `localStorage`. After a reload the row shows *Paused — re-select the file*; choosing the same file lists R2's parts and re-sends only the missing ones. If R2 no longer has the upload (`404`), it restarts with a clear message.
+- **Rename/move:** the destination must not exist (an identical existing copy counts as a completed retry); a folder cannot move inside itself; a section cannot leave its course; a course cannot move, only be renamed; a lesson cannot be renamed to an extension the site will not show (`400`). Cross-course moves are allowed and leave enrollments alone.
+- **Delete:** objects first, then the D1 rows, so a failure never leaves a lesson whose file is gone but whose comments keep it visible. Deleting a course also deletes its enrollments, which is how a student loses access to a removed course.
+- **Bucket CORS is required for uploads:** origins `https://course-site.taxin.workers.dev`, `http://localhost:4200`, `http://192.168.0.101:4200`; methods `GET, HEAD, PUT, POST`; header `content-type`; expose `ETag`; max age 3600. Without the exposed `ETag` a multipart upload cannot complete (the browser hides the header).
+- `public/_headers` now names the R2 endpoint in the report-only CSP's `connect-src`.
+- The bucket has an R2 lifecycle rule (`abort-incomplete-uploads`, Age 604800 s) that aborts incomplete multipart uploads after 7 days.
+
+Verified: `ng build`; the API suites (`46/46` file-manager checks, `35/35` discussion/notes/resources regression checks); in Chromium at 1200/393/320 px the tree, new folder, rename, delete-with-typed-name, drop overlay and root-upload refusal. Real uploads to `course-sourse` confirmed with `rclone size`: a 900 KB file by single PUT, 20 MiB and 60 MiB by multipart. A reload at 8 parts left only part 7 to re-send (checked against `ListParts` and the page's resource timings), and the file then completed at exactly 60 MiB. Test objects were deleted afterwards.
+
 ## 5. Known limitations and risks
 
 1. A signed-in technical student can still capture or fetch media with their cookie (`yt-dlp`, or the file URL for plain MP4/PDF). No DRM.
@@ -161,7 +200,7 @@ See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 
 3. HLS segments are not encrypted; protection is the session cookie only.
 4. Login lockout exists, but there is no Cloudflare WAF/bot protection configured; see `docs/SECURITY.md`.
 5. No password change by the student, no self-service reset, no "disable" (only delete).
-6. Progress, notes and course access are keyed by R2 object/folder names, so renaming loses them (a fixed course ID in D1 would fix access).
+6. Progress, notes, comments and course access are keyed by R2 object/folder names. Renaming through the in-app file manager carries them; renaming with rclone, the dashboard or an S3 client does not.
 6a. No access expiry dates; payment is manual (no gateway).
 7. `listCourse` lists the whole bucket per cold isolate/cache expiry.
 8. The schema helper only creates missing tables; altering a table needs a manual `wrangler d1 execute` or a try/catch `ALTER` step.
@@ -172,7 +211,7 @@ See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 
 
 ## 6. Backlog (suggested order)
 
-0. Fixed course IDs (rename-safe), access expiry dates, a phone menu button for the outline, and (later) automatic payment through a Bangladeshi gateway (SSLCommerz, bKash API).
+0. Access expiry dates, a phone menu button for the outline, and (later) automatic payment through a Bangladeshi gateway (SSLCommerz, bKash API). Renames are now handled by the file manager.
 
 1. Run `npm run build`, open the site, and fix whatever breaks (PDF layout, admin flows, mobile).
 2. Google login is implemented; do the Google Cloud setup in `docs/PLAN-google-login.md` and test it end to end (the JWT verification was unit-tested with a locally generated key, not against real Google).
@@ -201,7 +240,7 @@ See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars     # SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD
+cp .dev.vars.example .dev.vars     # SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD, R2_* for uploads
 npm run build
 npm run api      # Worker on http://localhost:8787 (local D1 and R2)
 npm start        # Angular on http://localhost:4200
@@ -219,6 +258,8 @@ curl -b jar -H "Range: bytes=0-99" "localhost:8787/api/media/Demo/Notes.pdf" -i
 ```
 
 ## 9. Uploading course content to R2
+
+Use the in-app **Admin panel → Files** for ordinary work: pick or drag files onto a folder, and rename, move, delete or create folders there. It keeps student data attached and needs no `rclone`. Use `rclone` for bulk imports.
 
 Bucket: `course-sourse`. See the README for the folder mapping, the `rclone` setup and the MP4 `-movflags +faststart` fix (required for plain MP4 so playback starts without downloading the whole file).
 

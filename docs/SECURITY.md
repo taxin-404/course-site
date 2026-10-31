@@ -17,6 +17,15 @@ Served for the pages (`public/_headers`) and for every API response (Worker): `n
 
 A full Content-Security-Policy is shipped in **report-only** mode (it logs violations in the browser console but blocks nothing). After deploying, open the site, play a video, open a PDF and use Google sign-in; if the console shows no violations, change the header name in `public/_headers` from `Content-Security-Policy-Report-Only` to `Content-Security-Policy` to enforce it.
 
+### File manager and uploads
+- Every file-manager route lives under `/api/admin/` behind the existing admin check, so students cannot list, read, write or delete course files. The CSRF rule above applies to all of them.
+- Uploads go **browser → R2** with presigned S3 URLs that expire in **one hour**. The signing credentials (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) live only in Worker secrets; the browser never sees them. A presigned URL is a bearer token for one object (or one part) until it expires — do not paste one into a chat or a ticket.
+- The R2 API token should be scoped to `course-sourse` with Object Read & Write only, and rotated if it ever leaks. It is not the Cloudflare account API token.
+- Bucket CORS allows only the site origins (`https://course-site.taxin.workers.dev` and the two local dev origins), methods `GET, HEAD, PUT, POST`, the `content-type` header, and exposes only `ETag`. The report-only CSP's `connect-src` names the bucket because the browser talks to it directly.
+- Uploads accept any file type (the owner uploads PDFs, videos, and handouts); size is capped at 500 GB and keys must stay inside a course. Only files with a lesson extension become lessons and carry student data.
+- Moves and deletes run in the Worker through the R2 binding and are admin-only. A move is copy → rewrite D1 → delete originals, so an interruption never leaves a lesson whose key changed but whose data did not follow.
+- The `R2_*` secrets are optional: without them everything except uploads still works, and uploads answer `503`.
+
 ### Media (videos and PDFs)
 - Every request needs the session cookie **and an enrolled course**: students only get media, notes and the course list for the courses an admin gave them (admins get all), checked on every request in the Worker.
 - Every request needs the session cookie.
@@ -42,6 +51,7 @@ These run *inside* the student's browser. They watch the same requests the playe
 4. The scrape limit and `Sec-Fetch` gate are best effort; the per-lesson counter lives in each Worker instance's memory.
 5. Sessions last 7 days and there is no "sign out everywhere" button (a password reset does it).
 6. A shared password or Google account can be used by two people; there is no device limit.
+7. A stolen **admin** session can rewrite or delete course files, because the file manager trusts the session like the rest of the panel. Admin accounts deserve strong, unique credentials; the Owner is Google-only in production.
 
 ## Recommended next steps (highest value first)
 0. For real protection against extensions, use a DRM video host (Bunny Stream, Mux, Vimeo, VdoCipher). A burned-in per-student watermark makes leaks traceable.
