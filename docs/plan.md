@@ -1,6 +1,8 @@
 # Plan: Google login
 
-Status: planned, not implemented.
+Status: planned, not implemented. Part of the backlog in `docs/HANDOFF.md` (section 6).
+
+The Worker, `Api` service and admin panel referenced below are described in `README.md` and `docs/HANDOFF.md`.
 
 ## Goal
 Let students sign in with "Continue with Google" as well as email + password, without opening the site to the public.
