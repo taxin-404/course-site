@@ -313,6 +313,37 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
   .files-tool{width:30px}
 }
 
+/* Uploads: one card per file, a fill bar, and actions on the right */
+.files-jobs{display:grid;gap:.45rem}
+.files-job{display:flex;align-items:center;gap:.7rem;padding:.6rem .7rem;border-radius:15px;background:var(--panel);box-shadow:var(--shadow-sm)}
+.files-job.ok .files-ico{color:var(--ok)}
+.files-job.bad .files-ico{color:var(--bad)}
+.files-job-main{flex:1;min-width:0;display:grid;gap:.35rem}
+.files-job-top{display:flex;align-items:baseline;gap:.6rem;min-width:0}
+.files-job-top .files-meta{padding-left:0}
+.files-job .bar{height:7px}
+.files-job .bar i{background:linear-gradient(90deg,var(--acc),var(--acc-2))}
+.files-job.ok .bar i{background:var(--ok)}
+.files-job.bad .bar i{background:var(--bad)}
+.files-job-note{margin:0;color:var(--mute);font-size:.78rem;line-height:1.35}
+.files-job.bad .files-job-note{color:var(--bad)}
+.files-job .files-tools{align-items:center}
+.files-job .files-tools>button:not(.files-tool){padding:.4rem .7rem;font-size:.82rem;white-space:nowrap}
+.files-up{width:17px!important;height:17px!important;flex:none}
+.files-head-acts .p{display:inline-flex;align-items:center;gap:.4rem}
+.files-head-acts .p .files-up{stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+/* Dropping a file anywhere on the panel uploads into the folder that is open */
+.files{position:relative}
+.files-drop{position:absolute;inset:0;z-index:5;display:grid;place-content:center;justify-items:center;gap:.6rem;border-radius:18px;background:color-mix(in srgb,var(--acc) 12%,var(--panel));box-shadow:inset 0 0 0 3px var(--acc-soft),var(--shadow);color:var(--ink);font-weight:600;pointer-events:none;animation:adm-pop .12s ease}
+.files-drop svg{width:34px;height:34px;fill:none;stroke:var(--acc);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+@media(max-width:560px){
+  .files-job{flex-wrap:wrap;gap:.55rem}
+  .files-job-main{flex-basis:calc(100% - 50px)}
+  .files-job .files-tools{width:100%;justify-content:flex-end}
+}
+
 /* Dialogs */
 .adm-dialog{position:fixed;left:50%;top:50%;z-index:41;width:min(460px,94vw);max-height:90vh;overflow:auto;transform:translate(-50%,-50%);background:var(--panel);border-radius:18px;box-shadow:0 2px 6px rgba(0,0,0,.12),0 24px 70px rgba(0,0,0,.3);animation:adm-pop .16s ease}
 .adm-dialog.wide{width:min(620px,94vw);display:flex;flex-direction:column;overflow:hidden}

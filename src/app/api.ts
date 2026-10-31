@@ -16,6 +16,11 @@ export interface FileEntry { key: string; name: string; size: number; modified: 
 export interface FileListing { path: string; dirs: DirEntry[]; files: FileEntry[] }
 export interface UploadPart { partNumber: number; etag: string; size?: number }
 
+/** A failed API call that still knows its HTTP status, which the uploader needs. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 @Injectable({ providedIn: 'root' })
 export class Api {
   /** undefined = still checking the session, null = signed out */
@@ -29,7 +34,7 @@ export class Api {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Request failed');
+    if (!res.ok) throw new ApiError(data.error || 'Request failed', res.status);
     return data as T;
   }
 

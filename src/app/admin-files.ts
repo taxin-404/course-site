@@ -1,5 +1,6 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { Api, FileListing } from './api';
+import { UploadJob, Uploader } from './upload';
 
 type Kind = 'file' | 'folder';
 
@@ -19,7 +20,14 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 @Component({
   selector: 'app-admin-files',
   template: `
-    <section class="files" aria-label="Course files">
+    <section
+      class="files"
+      aria-label="Course files"
+      (dragenter)="dragEnter($event)"
+      (dragover)="dragOver($event)"
+      (dragleave)="dragLeave()"
+      (drop)="drop($event)"
+    >
       <div class="files-head">
         <nav class="files-crumbs" aria-label="Folder path">
           <button type="button" [class.here]="!path()" (click)="open('')">Course files</button>
@@ -29,17 +37,67 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
           }
         </nav>
         <div class="files-head-acts">
+          <input #picker type="file" multiple hidden (change)="pick(picker)" />
           <button type="button" class="adm-ico" title="Refresh" aria-label="Refresh folder" [disabled]="loading()" (click)="load()">
             <svg [class.spinning]="loading()" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7L21 8" />
               <path d="M21 3v5h-5" />
             </svg>
           </button>
-          <button type="button" class="p" (click)="newFolder()">New folder</button>
+          <button type="button" class="p" (click)="picker.click()">
+            <svg class="files-up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5" /><path d="m7 10 5-5 5 5" /><path d="M5 19h14" /></svg>
+            Upload
+          </button>
+          <button type="button" (click)="newFolder()">New folder</button>
         </div>
       </div>
 
       @if (error()) { <p class="files-error">{{ error() }}</p> }
+
+      @if (uploader.jobs().length) {
+        <div class="files-jobs">
+          @for (j of uploader.jobs(); track j.id) {
+            <div class="files-job" [class.ok]="j.state === 'done'" [class.bad]="j.state === 'error' || j.state === 'conflict'">
+              <span class="files-ico" aria-hidden="true">
+                @if (j.state === 'done') {
+                  <svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10" /></svg>
+                } @else {
+                  <svg viewBox="0 0 24 24"><path d="M12 16V5" /><path d="m7 10 5-5 5 5" /><path d="M5 19h14" /></svg>
+                }
+              </span>
+              <div class="files-job-main">
+                <div class="files-job-top">
+                  <span class="files-name">{{ j.name }}</span>
+                  <span class="files-meta">{{ size(j.size) }} · {{ stateText(j) }}</span>
+                </div>
+                <div class="bar"><i [style.width.%]="pct(j)"></i></div>
+                @if (j.error) { <p class="files-job-note">{{ j.error }}</p> }
+              </div>
+              <div class="files-tools">
+                @if (j.state === 'conflict') {
+                  <button type="button" (click)="uploader.replace(j.id)">Replace</button>
+                }
+                @if (j.state === 'paused') {
+                  <input #refile type="file" hidden (change)="reselect(j.id, refile)" />
+                  <button type="button" (click)="refile.click()">Re-select file</button>
+                }
+                @if (j.state === 'error') {
+                  <button type="button" (click)="uploader.retry(j.id)">Retry</button>
+                }
+                @if (j.state === 'done') {
+                  <button type="button" class="files-tool" title="Dismiss" aria-label="Dismiss finished upload" (click)="uploader.dismiss(j.id)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+                  </button>
+                } @else {
+                  <button type="button" class="files-tool" title="Cancel" aria-label="Cancel upload" (click)="uploader.cancel(j.id)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+                  </button>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      }
 
       <div class="files-list" role="list">
         @for (d of listing().dirs; track d.path) {
@@ -98,7 +156,14 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
       </div>
 
       @if (!loading() && !listing().dirs.length && !listing().files.length) {
-        <p class="files-empty">This folder is empty.</p>
+        <p class="files-empty">This folder is empty. Drop files here to upload.</p>
+      }
+
+      @if (dragging()) {
+        <div class="files-drop" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 16V5" /><path d="m7 10 5-5 5 5" /><path d="M5 19h14" /></svg>
+          <span>Drop to upload into {{ path() || 'the course list' }}</span>
+        </div>
       }
     </section>
 
@@ -143,10 +208,15 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
     </div>
   `,
 })
-export class AdminFiles {
+export class AdminFiles implements OnDestroy {
   protected readonly api = inject(Api);
+  protected readonly uploader = new Uploader(this.api, () => {
+    void this.load();
+    void this.api.init();
+  });
 
   protected readonly path = signal('');
+  protected readonly dragging = signal(false);
   protected readonly listing = signal<FileListing>({ path: '', dirs: [], files: [] });
   protected readonly loading = signal(true);
   protected readonly error = signal('');
@@ -161,8 +231,66 @@ export class AdminFiles {
     return parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join('/') }));
   });
 
+  private drags = 0;
+
   constructor() {
     void this.load();
+  }
+
+  ngOnDestroy(): void {
+    this.uploader.dispose();
+  }
+
+  protected pick(input: HTMLInputElement): void {
+    const files = Array.from(input.files || []);
+    input.value = '';
+    if (files.length) this.uploader.add(files, this.path());
+  }
+
+  protected reselect(id: number, input: HTMLInputElement): void {
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) this.uploader.resume(id, file);
+  }
+
+  protected dragEnter(event: DragEvent): void {
+    event.preventDefault();
+    this.drags++;
+    this.dragging.set(true);
+  }
+
+  protected dragOver(event: DragEvent): void {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  }
+
+  protected dragLeave(): void {
+    this.drags = Math.max(0, this.drags - 1);
+    if (!this.drags) this.dragging.set(false);
+  }
+
+  protected drop(event: DragEvent): void {
+    event.preventDefault();
+    this.drags = 0;
+    this.dragging.set(false);
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (files.length) this.uploader.add(files, this.path());
+  }
+
+  protected pct(job: UploadJob): number {
+    if (!job.size) return 0;
+    return Math.max(0, Math.min(100, Math.round((job.loaded / job.size) * 100)));
+  }
+
+  protected stateText(job: UploadJob): string {
+    switch (job.state) {
+      case 'waiting': return 'waiting';
+      case 'uploading': return this.pct(job) + '%';
+      case 'conflict': return 'needs a decision';
+      case 'paused': return 'paused';
+      case 'done': return 'uploaded';
+      default: return 'failed';
+    }
   }
 
   protected async load(): Promise<void> {
