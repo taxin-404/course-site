@@ -58,7 +58,7 @@ input[type=radio]{width:18px;height:18px;min-height:0;padding:0;margin:0;flex:no
 
 /* ===== Logo & header ===== */
 .logo{font-family:"Curse of the Zombie",Georgia,serif!important;font-weight:400!important;font-synthesis:none;text-transform:uppercase;font-size:1.9rem;line-height:1.3;letter-spacing:.08em;color:var(--ink);padding:.1em 0;white-space:nowrap}
-header{display:flex;justify-content:space-between;align-items:center;height:var(--head);padding:0 clamp(1rem,3vw,2.6rem);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10;
+header{display:flex;justify-content:space-between;align-items:center;height:var(--head);padding:0 1.3rem;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10;
   background:color-mix(in srgb,var(--panel) 80%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 header div{display:flex;gap:.55rem}
 header button{white-space:nowrap}
@@ -77,13 +77,6 @@ header button{white-space:nowrap}
 .head-clear svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .head-toggle,.head-close,.head-burger{display:none;width:38px;height:38px;padding:0;place-items:center}
 .head-toggle svg,.head-close svg,.head-burger svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
-
-/* The header sits on the same gutter as the page content, and on wide screens the
-   field is centred on the page instead of on the gap between the logo and the
-   buttons (the account cluster is wider than the wordmark, which pulled it left). */
-@media(min-width:1024px){
-  .head-search{position:absolute;left:50%;top:50%;width:min(520px,calc(100vw - 36rem));margin:0;transform:translate(-50%,-50%)}
-}
 
 /* Search results: a panel under the field, listing courses and lessons with their path */
 .head-results{position:absolute;left:50%;top:calc(100% + .5rem);z-index:20;display:grid;gap:.1rem;width:min(520px,100%);max-height:min(62vh,440px);overflow:auto;padding:.35rem;background:var(--panel);border-radius:14px;box-shadow:var(--shadow);transform:translateX(-50%);text-align:left}
@@ -365,7 +358,7 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
 .layout{height:calc(100dvh - var(--head))}
 @media(max-width:760px){
   :root{--head:54px}
-  header{padding:0 max(1rem,env(safe-area-inset-left))}
+  header{padding:0 max(.8rem,env(safe-area-inset-left))}
   header div{gap:.4rem}
   header button{padding:.45rem .75rem!important;font-size:.88rem;min-height:38px}
   .logo{font-size:1.5rem}
@@ -386,7 +379,7 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   header.searching .head-close{display:grid}
 
   /* The account menu drops out of the header, right-aligned like the burger */
-  .head-menu{position:absolute;top:calc(100% + .45rem);right:max(1rem,env(safe-area-inset-right));z-index:30;display:grid;gap:.15rem;width:min(240px,calc(100vw - 1.6rem));padding:.35rem;background:var(--panel);border-radius:14px;box-shadow:var(--shadow);opacity:0;visibility:hidden;transform:translateY(-6px);transition:opacity .15s,transform .15s,visibility .15s}
+  .head-menu{position:absolute;top:calc(100% + .45rem);right:max(.8rem,env(safe-area-inset-right));z-index:30;display:grid;gap:.15rem;width:min(240px,calc(100vw - 1.6rem));padding:.35rem;background:var(--panel);border-radius:14px;box-shadow:var(--shadow);opacity:0;visibility:hidden;transform:translateY(-6px);transition:opacity .15s,transform .15s,visibility .15s}
   .head-menu.open{opacity:1;visibility:visible;transform:none}
 
   .layout{grid-template-columns:1fr;height:auto;overflow:visible}
