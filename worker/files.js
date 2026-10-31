@@ -219,6 +219,19 @@ async function deleteEntry(env, rawPath, hooks) {
   return json({ ok: true, deleted: keys.length });
 }
 
+// ---- Folders ----
+// R2 has no folders: a folder is the shared prefix of keys. A zero-byte `.keep` gives an empty
+// one something to exist by; listCourse() ignores it because it is not a video or PDF.
+async function createFolder(env, rawPath, hooks) {
+  const p = cleanPath(rawPath);
+  if (p === null || !p) return bad('That name is not valid');
+  const existing = await env.RESOURCES.list({ prefix: p + '/', limit: 1 });
+  if (existing.objects.length) return bad('That folder already exists', 409);
+  await env.RESOURCES.put(p + '/.keep', new Uint8Array());
+  hooks.invalidate();
+  return json({ ok: true });
+}
+
 export async function handleFiles(req, env, path, method, url, hooks) {
   if (!path.startsWith('/api/admin/files')) return null;
 
@@ -236,6 +249,11 @@ export async function handleFiles(req, env, path, method, url, hooks) {
   if (path === '/api/admin/files/delete' && method === 'POST') {
     const b = await req.json().catch(() => ({}));
     return deleteEntry(env, b.path, hooks);
+  }
+
+  if (path === '/api/admin/files/folder' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return createFolder(env, b.path, hooks);
   }
 
   return bad('Not found', 404);
