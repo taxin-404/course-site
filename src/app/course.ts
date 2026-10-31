@@ -24,10 +24,10 @@ type View =
               <button class="bc-btn" (click)="home()">Courses</button>
               <span class="bc-sep">/</span>
               <button class="bc-btn" (click)="goToBreadcrumb(-1)">{{ v.courseTitle }}</button>
-              <span class="bc-sep">/</span>
+              @if (v.path.length) { <span class="bc-sep">/</span> }
               @for (seg of v.path; track $index; let i = $index) {
                 <button class="bc-btn" (click)="goToBreadcrumb(i)">{{ seg }}</button>
-                <span class="bc-sep">/</span>
+                @if (i < v.path.length - 1) { <span class="bc-sep">/</span> }
               }
             </div>
           }
