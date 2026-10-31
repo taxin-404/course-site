@@ -7,6 +7,8 @@
 - First admin (Owner) seeded from Cloudflare secrets `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
 - Logo in *Curse of the Zombie* (bundled font, capitals only).
 - Email and password validation on the server.
+- Optional invite-only Google sign-in: `GET /api/config`, `POST /api/login/google`, `google_sub` column (auto-migrated), "Continue with Google" button, admin "Google only" users and a Google badge. Enabled by the `GOOGLE_CLIENT_ID` variable.
+- Bulk user import in the Admin panel (paste or file; Google-only or generated passwords with CSV download) and `POST /api/admin/users/bulk`.
 - `docs/PLAN-google-login.md`.
 
 ### Changed
