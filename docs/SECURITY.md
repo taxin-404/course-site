@@ -18,6 +18,7 @@ Served for the pages (`public/_headers`) and for every API response (Worker): `n
 A full Content-Security-Policy is shipped in **report-only** mode (it logs violations in the browser console but blocks nothing). After deploying, open the site, play a video, open a PDF and use Google sign-in; if the console shows no violations, change the header name in `public/_headers` from `Content-Security-Policy-Report-Only` to `Content-Security-Policy` to enforce it.
 
 ### Media (videos and PDFs)
+- Every request needs the session cookie **and an enrolled course**: students only get media, notes and the course list for the courses an admin gave them (admins get all), checked on every request in the Worker.
 - Every request needs the session cookie.
 - **Browser-only gate:** the Worker requires `Sec-Fetch-Site: same-origin` and a media-type `Sec-Fetch-Dest`. Browsers send these automatically; `curl`, `wget`, `yt-dlp` and most download managers do not, and other websites cannot fake them. Opening a media URL in the address bar, an iframe or a new tab is refused. `Cross-Origin-Resource-Policy: same-origin` stops hotlinking.
 - **Scrape limit:** a student can open at most 20 distinct lessons per hour (admins exempt; `MAX_LESSONS_PER_HOUR` to change). Grabbing a whole course in one go gets `429`.
@@ -27,7 +28,8 @@ A full Content-Security-Policy is shipped in **report-only** mode (it logs viola
   - Each student's total media speed is capped at `MAX_MBPS` (default 12 Mbit/s, with a 20-second burst for buffering and seeking). Requests above the cap are delayed, not rejected, so playback stays smooth while bulk downloading is slow (a 1 GB file takes about 12 minutes instead of seconds). Admins are exempt. The cap is per Worker instance, so it is best effort.
   - Raise `MAX_MBPS` if a high-bitrate video buffers; lower it to slow downloads further.
 - Player: native download, remote playback and Picture-in-Picture are off, right-click is off, and the student's email floats over the video.
-- PDF viewer: print, download and open buttons are removed and the context menu is off.
+- PDF viewer: print, download and open buttons are removed, `supportsDownloading` is `false`, `Ctrl/Cmd+S` and `+P` are blocked, drag-and-drop open is off and the context menu is off. Download must stay disabled.
+- PDF notes are private: every `/api/notes` query is scoped to the signed-in user and the course is checked; notes are capped at about 1.5 MB per PDF.
 - Printing or "Save as PDF" of the web page itself produces a blank page.
 
 ## Browser extensions (FetchV, Video DownloadHelper, etc.)
