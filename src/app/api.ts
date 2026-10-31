@@ -3,7 +3,8 @@ import { Injectable, signal } from '@angular/core';
 export interface Lesson { id: string; title: string; kind: 'video' | 'pdf'; done: boolean }
 export interface Section { title: string | null; lessons: Lesson[] }
 export interface CourseData { title: string; sections: Section[] }
-export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean }
+export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number }
+export interface BulkResult { added: { email: string; password?: string }[]; skipped: { email: string; reason: string }[] }
 export interface Me { id: number; email: string; is_admin: number }
 
 @Injectable({ providedIn: 'root' })
@@ -37,6 +38,16 @@ export class Api {
     await this.init();
   }
 
+  /** Google OAuth client id from the server; '' when Google sign-in is not configured. */
+  async googleClientId(): Promise<string> {
+    try { return (await this.req<{ googleClientId: string }>('config')).googleClientId; } catch { return ''; }
+  }
+
+  async loginGoogle(credential: string): Promise<void> {
+    await this.req('login/google', { credential });
+    await this.init();
+  }
+
   async logout(): Promise<void> {
     await this.req('logout', {});
     this.me.set(null);
@@ -61,8 +72,11 @@ export class Api {
   }
 
   listUsers(): Promise<AdminUser[]> { return this.req<AdminUser[]>('admin/users'); }
-  addUser(email: string, password: string, is_admin: boolean): Promise<unknown> {
-    return this.req('admin/users', { email, password, is_admin });
+  addUser(email: string, password: string, is_admin: boolean, google_only = false): Promise<unknown> {
+    return this.req('admin/users', { email, password, is_admin, google_only });
+  }
+  bulkAdd(emails: string[], google_only: boolean, is_admin: boolean): Promise<BulkResult> {
+    return this.req<BulkResult>('admin/users/bulk', { emails, google_only, is_admin });
   }
   resetPassword(id: number, password: string): Promise<unknown> { return this.req(`admin/users/${id}/password`, { password }); }
   setRole(id: number, is_admin: boolean): Promise<unknown> { return this.req(`admin/users/${id}/role`, { is_admin }); }
