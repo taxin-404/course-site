@@ -2,6 +2,7 @@ import { Component, computed, effect, inject, signal, untracked } from '@angular
 import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
 import { PdfViewer, prefetchPdfAssets } from './pdf-viewer';
+import { LessonSearch } from './lesson-search';
 
 type View =
   | { kind: 'browser'; courseTitle: string; path: string[] }
@@ -34,7 +35,6 @@ type View =
 
           <!-- File browser -->
           @if (v.kind === 'browser') {
-            <input class="search-row" type="search" placeholder="Search lessons..." aria-label="Search lessons in this course" [value]="q()" (input)="q.set($any($event.target).value)" />
             <div class="browser">
               @for (item of browserItems(); track item.id) {
                 <button class="fb-item" (click)="onItemClick(item)">
@@ -88,8 +88,10 @@ type View =
 })
 export class Course {
   protected readonly api = inject(Api);
+  protected readonly search = inject(LessonSearch);
 
   constructor() {
+    this.search.reset();
     // Fetch the PDF viewer scripts in the background once the page is idle.
     const idle = (window as any).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 1500));
     idle(() => prefetchPdfAssets());
@@ -97,9 +99,7 @@ export class Course {
     effect(() => { const cs = this.api.courses(); if (cs.length === 1 && !untracked(() => this.view())) this.openCourse(cs[0]); });
   }
 
-  protected readonly q = signal('');
-
-  protected home(): void { this.view.set(null); this.activeCourse.set(null); this.q.set(''); }
+  protected home(): void { this.view.set(null); this.activeCourse.set(null); this.search.reset(); }
 
   protected readonly view = signal<View | null>(null);
   protected readonly activeCourse = signal<CourseData | null>(null);
@@ -111,7 +111,7 @@ export class Course {
     if (!v || v.kind !== 'browser' || !course) return [];
 
     // While searching, show a flat list of matching lessons in the whole course
-    const q = this.q().trim().toLowerCase();
+    const q = this.search.query().trim().toLowerCase();
     if (q) {
       return course.sections
         .flatMap((s) => s.lessons.filter((l) => l.title.toLowerCase().includes(q)))
@@ -154,7 +154,9 @@ export class Course {
 
   protected openCourse(c: CourseData): void {
     this.activeCourse.set(c);
-    this.q.set('');
+    this.search.query.set('');
+    this.search.expanded.set(false);
+    this.search.visible.set(true);
     this.view.set({ kind: 'browser', courseTitle: c.title, path: [] });
   }
 
@@ -170,7 +172,12 @@ export class Course {
         .flatMap((c) => c.sections)
         .flatMap((s) => s.lessons)
         .find((l) => l.id === item.id);
-      if (lesson) this.view.set({ kind: 'player', lesson, courseTitle: v.courseTitle, path: v.path });
+      if (lesson) {
+        // Watching a lesson: tuck the header search away, but keep the query for Back.
+        this.search.visible.set(false);
+        this.search.expanded.set(false);
+        this.view.set({ kind: 'player', lesson, courseTitle: v.courseTitle, path: v.path });
+      }
     }
   }
 
@@ -183,7 +190,10 @@ export class Course {
 
   protected backToBrowser(): void {
     const v = this.view();
-    if (v?.kind === 'player') this.view.set({ kind: 'browser', courseTitle: v.courseTitle, path: v.path });
+    if (v?.kind === 'player') {
+      this.search.visible.set(true);
+      this.view.set({ kind: 'browser', courseTitle: v.courseTitle, path: v.path });
+    }
   }
 
   /** Always the live lesson from app state, so "done" updates immediately. */

@@ -63,6 +63,19 @@ header{display:flex;justify-content:space-between;align-items:center;height:var(
 header div{display:flex;gap:.55rem}
 header button{white-space:nowrap}
 
+/* Lesson search in the header: sits between the logo and the account buttons */
+.head-search{display:flex;align-items:center;gap:.5rem;flex:1;min-width:0;justify-content:center;margin:0 clamp(.6rem,2.5vw,1.6rem)}
+.head-field{display:flex;align-items:center;gap:.5rem;flex:1;max-width:520px;height:38px;padding:0 .4rem 0 .75rem;border-radius:11px;background:var(--field);box-shadow:inset 0 1px 2px rgba(0,0,0,.07);transition:background .15s,box-shadow .15s}
+.head-field:focus-within{background:var(--panel-2);box-shadow:0 0 0 3px var(--acc-soft),inset 0 1px 2px rgba(0,0,0,.05)}
+.head-field input{flex:1;min-width:0;min-height:0;height:100%;padding:0;border:0;border-radius:0;background:none;box-shadow:none;font-size:.9rem}
+.head-field input:focus{box-shadow:none}
+.head-mag{width:16px;height:16px;flex:none;fill:none;stroke:var(--mute);stroke-width:2;stroke-linecap:round}
+.head-clear{width:26px;height:26px;padding:0;display:grid;place-items:center;border-radius:8px;background:none;box-shadow:none;color:var(--mute)}
+.head-clear:hover:not(:disabled){background:var(--acc-soft);box-shadow:none;color:var(--ink)}
+.head-clear svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.head-toggle,.head-close{display:none;width:38px;height:38px;padding:0;place-items:center}
+.head-toggle svg,.head-close svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+
 /* ===== Login ===== */
 .login{display:grid;gap:.85rem;width:min(390px,92vw);margin:14vh auto;padding:2rem 1.7rem;background:var(--panel);border-radius:20px;box-shadow:var(--shadow)}
 .login h1{text-align:center;font-size:1.7rem;margin-bottom:.3rem}
@@ -91,8 +104,6 @@ main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1.6rem clamp(1r
 .bc-btn:hover{text-decoration:underline}
 .bc-sep{color:var(--mute)}
 .browser{display:flex;flex-direction:column;gap:.55rem}
-.search-row{width:min(420px,100%);margin-bottom:.25rem;background:var(--panel);box-shadow:var(--shadow-sm)}
-.search-row:focus{background:var(--panel);box-shadow:0 0 0 3px var(--acc-soft),var(--shadow-sm)}
 .fb-item{display:flex;align-items:center;gap:.9rem;width:100%;text-align:left;padding:.8rem 1rem!important;border-radius:14px!important}
 .fb-item::after{content:"›";margin-left:auto;color:var(--mute);font-size:1.4rem;line-height:1;transition:transform .15s,color .15s}
 .fb-item:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
@@ -332,6 +343,19 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   header div{gap:.4rem}
   header button{padding:.45rem .75rem!important;font-size:.88rem;min-height:38px}
   .logo{font-size:1.5rem}
+
+  /* Header lesson search: a magnifier that expands over the whole header */
+  .head-search{flex:0 0 auto;margin:0;justify-content:flex-end}
+  .head-field{display:none}
+  .head-toggle{display:grid}
+  .head-field input{font-size:16px;min-height:0}
+  /* One close control on phones: the outer X clears and collapses together. */
+  .head-clear{display:none}
+  header.searching .logo,header.searching .head-actions{display:none}
+  header.searching .head-search{flex:1}
+  header.searching .head-field{display:flex;max-width:none}
+  header.searching .head-toggle{display:none}
+  header.searching .head-close{display:grid}
 
   .layout{grid-template-columns:1fr;height:auto;overflow:visible}
   .course-name{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
