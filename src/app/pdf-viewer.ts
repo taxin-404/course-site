@@ -1,5 +1,5 @@
-import { Component, computed, inject, input } from '@angular/core';
-import { NgxExtendedPdfViewerModule, pdfDefaultOptions } from 'ngx-extended-pdf-viewer';
+import { Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
+import { NgxExtendedPdfViewerModule, NgxExtendedPdfViewerService, pdfDefaultOptions } from 'ngx-extended-pdf-viewer';
 import { Api } from './api';
 
 // Open fast: stream the file, fetch only the pages being viewed, in larger chunks
@@ -23,38 +23,150 @@ export function prefetchPdfAssets(): void {
   }
 }
 
+type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
+
 @Component({
   selector: 'app-pdf-viewer',
   imports: [NgxExtendedPdfViewerModule],
   template: `
-    <ngx-extended-pdf-viewer
-      [src]="url()"
-      [showToolbar]="true"
-      [showSidebarButton]="false"
-      [showFindButton]="true"
-      [showPagingButtons]="true"
-      [showZoomButtons]="true"
-      [showPresentationModeButton]="false"
-      [showOpenFileButton]="false"
-      [showPrintButton]="false"
-      [showDownloadButton]="false"
-      [showSecondaryToolbarButton]="false"
-      [showRotateButton]="false"
-      [showHandToolButton]="false"
-      [showScrollingButtons]="false"
-      [showSpreadButton]="false"
-      [showPropertiesButton]="false"
-      [contextMenuAllowed]="false"
-      [enablePrint]="false"
-      [zoom]="'page-fit'"
-      [theme]="theme"
-    ></ngx-extended-pdf-viewer>
+    <div class="notes-bar">
+      <span class="notes-hint">🔒 Your notes are private. Only you can see them.</span>
+      <span class="notes-status">{{ status() }}</span>
+      <button type="button" (click)="toggleHidden()" [disabled]="!ready()">{{ hidden() ? 'Show my notes' : 'Hide my notes' }}</button>
+      <button type="button" class="reset" (click)="reset()" [disabled]="!ready()">Reset to original</button>
+    </div>
+    <div class="viewer-wrap">
+      <ngx-extended-pdf-viewer
+        [src]="url()"
+        [theme]="theme"
+        [zoom]="'page-fit'"
+        [showToolbar]="true"
+        [showSidebarButton]="true"
+        [showFindButton]="true"
+        [showPagingButtons]="true"
+        [showZoomButtons]="true"
+        [showPresentationModeButton]="true"
+        [showSecondaryToolbarButton]="true"
+        [showRotateButton]="true"
+        [showHandToolButton]="true"
+        [showScrollingButtons]="true"
+        [showSpreadButton]="true"
+        [showPropertiesButton]="true"
+        [showEditorButtons]="true"
+        [showTextEditor]="true"
+        [showDrawEditor]="true"
+        [showHighlightEditor]="true"
+        [showStampEditor]="true"
+        [showEraserEditor]="true"
+        [showUndoRedoButtons]="true"
+        [showCommentEditor]="false"
+        [showSignatureEditor]="false"
+        [supportsDownloading]="false"
+        [showDownloadButton]="false"
+        [disableDownloadButton]="true"
+        [showPrintButton]="false"
+        [enablePrint]="false"
+        [showOpenFileButton]="false"
+        [enableDragAndDrop]="false"
+        [contextMenuAllowed]="false"
+        (pagesLoaded)="onLoaded()"
+        (annotationEditorEvent)="onEdit()"
+      ></ngx-extended-pdf-viewer>
+    </div>
   `,
-  styles: [],
 })
 export class PdfViewer {
   private readonly api = inject(Api);
+  private readonly pdf = inject(NgxExtendedPdfViewerService);
   protected readonly theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   readonly key = input.required<string>();
   protected readonly url = computed(() => this.api.mediaUrl(this.key()));
+  protected readonly hidden = signal(false);
+  protected readonly ready = signal(false);
+  protected readonly status = signal('');
+  private saved: object[] = []; // what is stored on the server
+  private applying = false; // true while we add/remove notes ourselves, so those events are not saved
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor() {
+    // Downloading must never work: block the save and print shortcuts (the buttons are already off).
+    const block = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && ['s', 'p'].includes(e.key?.toLowerCase())) { e.preventDefault(); e.stopImmediatePropagation(); }
+    };
+    window.addEventListener('keydown', block, true);
+    inject(DestroyRef).onDestroy(() => {
+      window.removeEventListener('keydown', block, true);
+      if (this.timer) { clearTimeout(this.timer); void this.save(); }
+    });
+  }
+
+  private current(): object[] {
+    return (this.pdf.getSerializedAnnotations() ?? []).map((a) => {
+      const c = { ...(a as object) } as Record<string, unknown>;
+      delete c['id']; // temporary id, not needed
+      return c;
+    });
+  }
+
+  private async apply(notes: object[]): Promise<void> {
+    this.applying = true;
+    try { for (const n of notes) await this.pdf.addEditorAnnotation(n as Note); }
+    finally { setTimeout(() => (this.applying = false), 400); }
+  }
+
+  private clear(): void {
+    this.applying = true;
+    this.pdf.removeEditorAnnotations(() => true);
+    setTimeout(() => (this.applying = false), 400);
+  }
+
+  protected async onLoaded(): Promise<void> {
+    try {
+      this.saved = (await this.api.getNotes(this.key())).data;
+      await this.apply(this.saved);
+    } catch { this.status.set('Could not load your notes'); }
+    this.ready.set(true);
+  }
+
+  protected onEdit(): void {
+    if (this.applying || this.hidden() || !this.ready()) return;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.save(), 1200);
+  }
+
+  private async save(): Promise<void> {
+    this.timer = undefined;
+    let notes: object[];
+    try { notes = this.current(); } catch { return; }
+    if (JSON.stringify(notes) === JSON.stringify(this.saved)) return;
+    this.status.set('Saving…');
+    try { await this.api.saveNotes(this.key(), notes); this.saved = notes; this.status.set('Saved'); }
+    catch (e) { this.status.set((e as Error).message || 'Could not save'); }
+  }
+
+  protected async toggleHidden(): Promise<void> {
+    if (!this.hidden()) {
+      await this.save(); // keep whatever was just written
+      this.hidden.set(true);
+      this.clear();
+    } else {
+      const extra = this.current(); // anything written while the notes were hidden
+      this.clear();
+      await this.apply([...this.saved, ...extra]);
+      this.hidden.set(false);
+      await this.save();
+    }
+  }
+
+  protected async reset(): Promise<void> {
+    if (!confirm('Delete all your notes on this PDF and go back to the original?')) return;
+    clearTimeout(this.timer);
+    try {
+      await this.api.clearNotes(this.key());
+      this.clear();
+      this.saved = [];
+      this.hidden.set(false);
+      this.status.set('Back to the original');
+    } catch (e) { this.status.set((e as Error).message || 'Could not reset'); }
+  }
 }

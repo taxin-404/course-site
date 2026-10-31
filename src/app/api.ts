@@ -82,6 +82,10 @@ export class Api {
   setRole(id: number, is_admin: boolean): Promise<unknown> { return this.req(`admin/users/${id}/role`, { is_admin }); }
   deleteUser(id: number): Promise<unknown> { return this.req(`admin/users/${id}`, undefined, 'DELETE'); }
 
+  getNotes(lesson: string): Promise<{ data: object[] }> { return this.req(`notes/${encodeURIComponent(lesson)}`); }
+  saveNotes(lesson: string, data: object[]): Promise<unknown> { return this.req(`notes/${encodeURIComponent(lesson)}`, { data }, 'PUT'); }
+  clearNotes(lesson: string): Promise<unknown> { return this.req(`notes/${encodeURIComponent(lesson)}`, undefined, 'DELETE'); }
+
   mediaUrl(key: string): string {
     return '/api/media/' + key.split('/').map(encodeURIComponent).join('/');
   }

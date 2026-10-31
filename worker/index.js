@@ -40,6 +40,7 @@ async function sessionCookie(u, env) {
 const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0)',
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
+  'CREATE TABLE IF NOT EXISTS pdf_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS attempts (k TEXT PRIMARY KEY, n INTEGER NOT NULL, t INTEGER NOT NULL)',
 ];
 let ready;
@@ -319,6 +320,28 @@ const handle = async (req, env) => {
         })));
       }
       if (path.startsWith('/api/media/')) return serve(req, env, decodeURIComponent(path.slice(11)), u);
+      if (path.startsWith('/api/notes/')) {
+        // Private PDF notes: every query is scoped to the signed-in user, so nobody can read another student's notes.
+        const lesson = decodeURIComponent(path.slice(11));
+        if (lesson.length > 500 || !/\.pdf$/i.test(lesson)) return json({ error: 'Bad lesson' }, 400);
+        if (m === 'GET') {
+          const r = await env.DB.prepare('SELECT data FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).first();
+          return json({ data: r ? JSON.parse(r.data) : [] });
+        }
+        if (m === 'PUT') {
+          const { data } = await req.json();
+          if (!Array.isArray(data)) return json({ error: 'Bad notes' }, 400);
+          const text = JSON.stringify(data);
+          if (text.length > 1500000) return json({ error: 'Your notes on this PDF are too large to save' }, 413);
+          if (!data.length) await env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
+          else await env.DB.prepare('INSERT INTO pdf_notes (user_id, lesson, data, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, lesson) DO UPDATE SET data = excluded.data, updated = excluded.updated').bind(u.id, lesson, text, Date.now()).run();
+          return json({ ok: true });
+        }
+        if (m === 'DELETE') {
+          await env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
+          return json({ ok: true });
+        }
+      }
       if (path === '/api/progress' && m === 'POST') {
         const { lesson, done } = await req.json();
         await env.DB.prepare(done ? 'INSERT OR IGNORE INTO watched (user_id, lesson) VALUES (?, ?)' : 'DELETE FROM watched WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
@@ -390,6 +413,7 @@ const handle = async (req, env) => {
             if (isOwner(env, t.email) || t.id === u.id) return json({ error: 'You cannot delete this admin' }, 400);
             await env.DB.batch([
               env.DB.prepare('DELETE FROM watched WHERE user_id = ?').bind(id),
+              env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
             ]);
             return json({ ok: true });

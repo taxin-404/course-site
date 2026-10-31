@@ -181,8 +181,14 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
 
 /* PDF reader: fill the lesson area */
 .player-body:has(app-pdf-viewer){padding:0;overflow:hidden}
-app-pdf-viewer{display:block;flex:1;min-height:0;height:100%}
-app-pdf-viewer ngx-extended-pdf-viewer{height:100%}
+app-pdf-viewer{display:flex;flex-direction:column;flex:1;min-height:0;height:100%}
+app-pdf-viewer .viewer-wrap{position:relative;flex:1;min-height:0}
+app-pdf-viewer .viewer-wrap ngx-extended-pdf-viewer{position:absolute;inset:0;height:100%}
+.notes-bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.35rem .8rem;border-bottom:1px solid var(--line);background:var(--panel);font-size:.82rem}
+.notes-hint{color:var(--mute);margin-right:auto}
+.notes-status{color:var(--mute)}
+.notes-bar button{padding:.3rem .7rem;font-size:.82rem}
+.notes-bar .reset:hover:not(:disabled){border-color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,transparent);color:var(--bad)}
 app-pdf-viewer #viewerContainer,app-pdf-viewer .zoom{background:var(--bg)}
 @media(max-width:760px){.player-body:has(app-pdf-viewer){height:calc(100dvh - var(--head) - 150px);min-height:420px}}
 
