@@ -7,3 +7,7 @@ ADMIN_PASSWORD=replace-with-a-strong-password
 
 # Optional: allow direct MP4/WebM playback (default: HLS only)
 # ALLOW_MP4=1
+
+# Optional: enables "Continue with Google" (public OAuth Web client ID, not a secret).
+# See docs/PLAN-google-login.md
+# GOOGLE_CLIENT_ID=1234567890-xxxx.apps.googleusercontent.com
