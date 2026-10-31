@@ -67,9 +67,14 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
         <span class="lbl">{{ hidden() ? 'Show my notes' : 'Hide my notes' }}</span>
       </button>
       <button type="button" class="notes-btn reset" (click)="reset()" [disabled]="!ready()"
-        aria-label="Reset to original" title="Reset to original">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>
-        <span class="lbl">Reset to original</span>
+        aria-label="Delete my notes" title="Delete my notes">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16" />
+          <path d="M9 7V4.5h6V7" />
+          <path d="M6.5 7l.9 12.5h9.2L17.5 7" />
+          <path d="M10 10.5v6M14 10.5v6" />
+        </svg>
+        <span class="lbl">Delete notes</span>
       </button>
     </div>
     <div class="viewer-wrap">
