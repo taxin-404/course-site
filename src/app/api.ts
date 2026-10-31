@@ -6,6 +6,11 @@ export interface CourseData { title: string; sections: Section[] }
 export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number; courses: string[] }
 export interface BulkResult { added: { email: string; password?: string }[]; skipped: { email: string; reason: string }[] }
 export interface Me { id: number; email: string; is_admin: number }
+export interface Comment {
+  id: number; parent_id: number | null; body: string; created: number;
+  name: string; initial: string; likes: number; liked: boolean; own: boolean; can_delete: boolean;
+}
+export interface ResourceItem { id: number; title: string; url: string; note: string | null }
 
 @Injectable({ providedIn: 'root' })
 export class Api {
@@ -87,6 +92,27 @@ export class Api {
   getNotes(lesson: string): Promise<{ data: object[] }> { return this.req(`notes/${encodeURIComponent(lesson)}`); }
   saveNotes(lesson: string, data: object[]): Promise<unknown> { return this.req(`notes/${encodeURIComponent(lesson)}`, { data }, 'PUT'); }
   clearNotes(lesson: string): Promise<unknown> { return this.req(`notes/${encodeURIComponent(lesson)}`, undefined, 'DELETE'); }
+
+  // ---- Lesson discussion, private notes, resources (video lessons) ----
+  private lessonPath(key: string, tail: string): string {
+    return `lesson/${encodeURIComponent(key)}/${tail}`;
+  }
+
+  comments(key: string): Promise<{ comments: Comment[] }> { return this.req(this.lessonPath(key, 'comments')); }
+  postComment(key: string, body: string, parent?: number): Promise<{ comment: Comment }> {
+    return this.req(this.lessonPath(key, 'comments'), parent ? { body, parent } : { body });
+  }
+  likeComment(id: number): Promise<{ liked: boolean; likes: number }> { return this.req(`comments/${id}/like`, {}); }
+  deleteComment(id: number): Promise<unknown> { return this.req(`comments/${id}`, undefined, 'DELETE'); }
+
+  videoNotes(key: string): Promise<{ body: string }> { return this.req(this.lessonPath(key, 'notes')); }
+  saveVideoNotes(key: string, body: string): Promise<unknown> { return this.req(this.lessonPath(key, 'notes'), { body }, 'PUT'); }
+
+  resources(key: string): Promise<{ resources: ResourceItem[] }> { return this.req(this.lessonPath(key, 'resources')); }
+  addResource(key: string, r: { title: string; url: string; note?: string }): Promise<{ resource: ResourceItem }> {
+    return this.req(`admin/${this.lessonPath(key, 'resources')}`, r);
+  }
+  deleteResource(id: number): Promise<unknown> { return this.req(`admin/resources/${id}`, undefined, 'DELETE'); }
 
   mediaUrl(key: string): string {
     return '/api/media/' + key.split('/').map(encodeURIComponent).join('/');

@@ -3,6 +3,7 @@ import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
 import { PdfViewer, prefetchPdfAssets } from './pdf-viewer';
 import { LessonSearch } from './lesson-search';
+import { LessonPanel } from './lesson-panel';
 
 type View =
   | { kind: 'browser'; courseTitle: string; path: string[] }
@@ -10,7 +11,7 @@ type View =
 
 @Component({
   selector: 'app-course',
-  imports: [Player, PdfViewer],
+  imports: [Player, PdfViewer, LessonPanel],
   template: `
     <div class="layout">
 
@@ -64,6 +65,7 @@ type View =
                 <app-pdf-viewer [key]="l.id" />
               } @else {
                 <app-player [key]="l.id" (ended)="finish(l)" />
+                <app-lesson-panel [lesson]="l" />
               }
             </div>
           }
