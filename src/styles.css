@@ -101,7 +101,7 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 .admin h1{font-size:2rem}
 .admin .sub{margin:.2rem 0 0;color:var(--mute)}
 .admin .ac{display:grid;gap:.9rem;padding:1.2rem 1.3rem;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
-.admin .af{display:grid;grid-template-columns:1fr 1fr auto auto;gap:.6rem;align-items:center}
+.admin .af{display:grid;grid-template-columns:1fr 1fr auto auto auto;gap:.6rem;align-items:center}
 .admin .af input:not([type=checkbox]){min-width:0}
 .admin .chk{display:flex;gap:.45rem;align-items:center;color:var(--mute);white-space:nowrap}
 .admin .chk input{width:auto;margin:0;accent-color:var(--acc)}
@@ -190,3 +190,21 @@ app-pdf-viewer #viewerContainer,app-pdf-viewer .zoom{background:var(--bg)}
 .done-btn{min-width:150px;display:inline-flex;align-items:center;justify-content:center;gap:.4rem;white-space:nowrap}
 .done-btn.is-done{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 55%,var(--line));background:color-mix(in srgb,var(--ok) 12%,transparent)}
 .done-btn.is-done:hover:not(:disabled){background:color-mix(in srgb,var(--bad) 10%,transparent);border-color:var(--bad);color:var(--bad)}
+
+/* Google sign-in */
+.or{display:flex;align-items:center;gap:.8rem;color:var(--mute);font-size:.85rem;margin:.2rem 0}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+.gsi{display:flex;justify-content:center;min-height:44px;color-scheme:light}
+.gsi[hidden],.or[hidden]{display:none}
+.admin .hint{color:var(--mute);font-size:.9rem;align-self:center}
+.admin .badge.g{border-color:transparent;background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}
+@media(max-width:700px){.admin .af{grid-template-columns:1fr}}
+
+/* Bulk add */
+.admin textarea{width:100%;padding:.65rem .85rem;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);font:.9rem/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:inherit;resize:vertical;transition:border-color .15s,box-shadow .15s}
+.admin textarea:focus{outline:0;border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
+.admin .bf{display:flex;flex-wrap:wrap;gap:.6rem 1rem;align-items:center}
+.admin .bf .p{margin-left:auto}
+.admin .file{position:relative;cursor:pointer;color:var(--acc);font-weight:500}
+.admin .file input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+@media(max-width:700px){.admin .bf .p{margin-left:0;width:100%}}
