@@ -125,7 +125,7 @@ const ROLES: { key: RoleFilter; label: string }[] = [
               <label class="adm-check" (click)="$event.stopPropagation()">
                 <input type="checkbox" [attr.aria-label]="'Select ' + u.email" [checked]="selected().has(u.id)" (change)="toggleSel(u.id)" />
               </label>
-              <button type="button" class="adm-user" (click)="open(u)">
+              <div class="adm-user">
                 <span class="av">{{ u.email.charAt(0).toUpperCase() }}</span>
                 <span class="who">
                   <strong>{{ u.email }}</strong>
@@ -134,15 +134,14 @@ const ROLES: { key: RoleFilter; label: string }[] = [
                     @if (u.google) { · Google sign-in }
                   </small>
                 </span>
-              </button>
+              </div>
               <span class="adm-col-prog">{{ u.watched }} lesson{{ u.watched === 1 ? '' : 's' }}</span>
               <span class="adm-col-acc">
                 @if (u.is_admin) { <span class="pill adm">All courses</span> }
                 @else { <span class="pill">{{ u.courses.length }} course{{ u.courses.length === 1 ? '' : 's' }}</span> }
               </span>
               <span class="adm-col-act">
-                @if (u.owner) { <span class="pill owner">Owner</span> }
-                @else { <button type="button" (click)="open(u)">Manage</button> }
+                <button type="button" (click)="open(u)">Manage</button>
               </span>
             </div>
           }

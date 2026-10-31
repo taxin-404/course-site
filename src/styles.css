@@ -189,8 +189,7 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 .adm-row.sel{background:var(--acc-soft)}
 .adm-check{display:flex}
 .adm-check input{width:18px;height:18px;margin:0;accent-color:var(--acc);cursor:pointer}
-.adm-user{display:flex;align-items:center;gap:.8rem;min-width:0;padding:0;background:none;border:0;border-radius:10px;box-shadow:none;text-align:left}
-.adm-user:hover{background:none;box-shadow:none}
+.adm-user{display:flex;align-items:center;gap:.8rem;min-width:0;padding:0;font-weight:500;text-align:left}
 .av{width:38px;height:38px;flex-shrink:0;display:grid;place-items:center;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc-2));color:var(--on-acc);font-weight:650}
 .av.big{width:46px;height:46px;font-size:1.1rem}
 .who{display:grid;min-width:0}
