@@ -11,6 +11,10 @@ export interface Comment {
   name: string; initial: string; likes: number; liked: boolean; own: boolean; can_delete: boolean;
 }
 export interface ResourceItem { id: number; title: string; url: string; note: string | null }
+export interface DirEntry { name: string; path: string }
+export interface FileEntry { key: string; name: string; size: number; modified: number; lesson: boolean; hls: boolean }
+export interface FileListing { path: string; dirs: DirEntry[]; files: FileEntry[] }
+export interface UploadPart { partNumber: number; etag: string; size?: number }
 
 @Injectable({ providedIn: 'root' })
 export class Api {
@@ -116,5 +120,32 @@ export class Api {
 
   mediaUrl(key: string): string {
     return '/api/media/' + key.split('/').map(encodeURIComponent).join('/');
+  }
+
+  // ---- Admin file manager ----
+  listFiles(prefix = ''): Promise<FileListing> { return this.req(`admin/files?prefix=${encodeURIComponent(prefix)}`); }
+  createFolder(path: string): Promise<unknown> { return this.req('admin/files/folder', { path }); }
+  moveEntry(from: string, to: string, kind: 'file' | 'folder'): Promise<unknown> {
+    return this.req('admin/files/move', { from, to, kind });
+  }
+  deleteEntry(path: string, kind: 'file' | 'folder'): Promise<unknown> { return this.req('admin/files/delete', { path, kind }); }
+
+  uploadStart(key: string, size: number, overwrite = false): Promise<{ uploadId: string; key: string }> {
+    return this.req('admin/files/upload/start', { key, size, overwrite });
+  }
+  uploadPartUrl(key: string, uploadId: string, partNumber: number): Promise<{ url: string }> {
+    return this.req('admin/files/upload/part', { key, uploadId, partNumber });
+  }
+  uploadUrl(key: string, size: number, overwrite = false): Promise<{ url: string }> {
+    return this.req('admin/files/upload/url', { key, size, overwrite });
+  }
+  uploadComplete(key: string, uploadId: string, parts: UploadPart[]): Promise<unknown> {
+    return this.req('admin/files/upload/complete', { key, uploadId, parts });
+  }
+  uploadAbort(key: string, uploadId: string): Promise<unknown> {
+    return this.req('admin/files/upload/abort', { key, uploadId });
+  }
+  uploadParts(key: string, uploadId: string): Promise<{ parts: UploadPart[] }> {
+    return this.req(`admin/files/upload/parts?key=${encodeURIComponent(key)}&uploadId=${encodeURIComponent(uploadId)}`);
   }
 }
