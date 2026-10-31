@@ -23,7 +23,7 @@ A full Content-Security-Policy is shipped in **report-only** mode (it logs viola
 - The R2 API token should be scoped to `course-sourse` with Object Read & Write only, and rotated if it ever leaks. It is not the Cloudflare account API token.
 - Bucket CORS allows only the site origins (`https://course-site.taxin.workers.dev` and the two local dev origins), methods `GET, HEAD, PUT, POST`, the `content-type` header, and exposes only `ETag`. The report-only CSP's `connect-src` names the bucket because the browser talks to it directly.
 - Uploads accept any file type (the owner uploads PDFs, videos, and handouts); size is capped at 500 GB and keys must stay inside a course. Only files with a lesson extension become lessons and carry student data.
-- Moves and deletes run in the Worker through the R2 binding and are admin-only. A move is copy → rewrite D1 → delete originals, so an interruption never leaves a lesson whose key changed but whose data did not follow.
+- Moves and deletes run in the Worker through the R2 binding and are admin-only. A move is copy → rewrite D1 → delete originals: if the record rewrite fails partway the copies stay, so no student row ever points at a missing object, and re-running the same move finishes it.
 - The `R2_*` secrets are optional: without them everything except uploads still works, and uploads answer `503`.
 
 ### Media (videos and PDFs)

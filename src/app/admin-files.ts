@@ -10,7 +10,7 @@ interface Ask {
   label: string;
   confirm: string;
   danger: boolean;
-  run: (value: string) => Promise<void>;
+  run: (value: string) => Promise<unknown>;
 }
 
 interface Toast { id: number; text: string; bad: boolean }
@@ -23,6 +23,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
     <section
       class="files"
       aria-label="Course files"
+      (document:keydown.escape)="closeAsk()"
       (dragenter)="dragEnter($event)"
       (dragover)="dragOver($event)"
       (dragleave)="dragLeave()"
@@ -351,12 +352,14 @@ export class AdminFiles implements OnDestroy {
   protected askMove(full: string, kind: Kind): void {
     this.openAsk({
       title: `Move ${kind}`,
-      hint: 'Type the destination folder, for example Course or Course / Section.',
+      hint: 'Type the destination folder, for example Course or Course/Section.',
       label: 'Destination folder',
       confirm: 'Move',
       danger: false,
       run: async (value) => {
-        const dest = value.replace(/^\/+|\/+$/g, '');
+        // Trim each segment as well as the ends, so "Course / Section" does not create
+        // folders named "Course " and " Section".
+        const dest = value.split('/').map((part) => part.trim()).filter(Boolean).join('/');
         await this.api.moveEntry(full, this.join(dest, this.base(full)), kind);
       },
     }, this.path());
@@ -390,9 +393,11 @@ export class AdminFiles implements OnDestroy {
     this.busy.set(true);
     this.askError.set('');
     try {
-      await ask.run(this.askValue().trim());
+      const result = await ask.run(this.askValue().trim());
       this.ask.set(null);
-      this.toast('Done');
+      const warning = result && typeof result === 'object' ? (result as { warning?: string }).warning : '';
+      if (warning) this.toast(warning, true);
+      else this.toast('Done');
       void this.api.init(); // the course tree shown elsewhere is now out of date
       await this.load();
     } catch (e) {

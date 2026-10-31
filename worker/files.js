@@ -58,6 +58,7 @@ async function listFolder(env, prefix) {
     for (const o of r.objects) {
       const name = o.key.slice(base(prefix).length);
       if (!name || name.includes('/') || name === '.keep') continue;
+      if (!prefix) continue; // root-level strays are not lessons and cannot be managed here
       if (/\.ts$/i.test(name)) continue; // part of an HLS lesson, not its own row
       files.push({
         key: o.key,
@@ -131,6 +132,14 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
   }
 
   const pairs = objects.map((o) => ({ from: o.key, to: to + o.key.slice(from.length) }));
+
+  // A destination that already holds unrelated objects would be merged into, not replaced.
+  // A partial or complete copy left by an interrupted attempt is allowed, so running the
+  // same move again simply finishes it; the per-object check below still refuses a
+  // destination key whose copy differs.
+  const destKeys = new Set(pairs.map((p) => p.to));
+  const targetObjects = await listAll(env, to + '/');
+  if (targetObjects.some((o) => !destKeys.has(o.key))) return bad('Something already exists at ' + to, 409);
   const copies = [];
   for (const p of pairs) {
     const [src, dst] = await Promise.all([env.RESOURCES.head(p.from), env.RESOURCES.head(p.to)]);
@@ -147,7 +156,7 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
     for (const p of copies) {
       const obj = await env.RESOURCES.get(p.from);
       if (!obj) return bad('Not found: ' + p.from, 404);
-      await env.RESOURCES.put(p.to, obj.body, { httpMetadata: obj.httpMetadata });
+      await env.RESOURCES.put(p.to, obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata });
       written.push(p.to);
     }
   } catch (e) {
@@ -166,12 +175,16 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
   try {
     await runChunks(env, statements);
   } catch (e) {
-    if (written.length) await env.RESOURCES.delete(written).catch(() => {});
-    return bad('Could not update the lesson records: ' + (e && e.message ? e.message : e), 500);
+    // Some batches may have committed, so deleting the copies would detach the rows that
+    // already point at them. Keep both copies and let the same move finish the work.
+    hooks.invalidate();
+    return bad('The files were copied, but some lesson records could not be updated. Run the same move again to finish it. ' + (e && e.message ? e.message : e), 500);
   }
 
   hooks.invalidate();
-  const olds = pairs.filter((p) => !p.skip).map((p) => p.from);
+  // Delete every source, including ones whose target copy already existed (a retry after an
+  // interrupted move), so the move really finishes instead of leaving two copies behind.
+  const olds = pairs.map((p) => p.from);
   try {
     for (let i = 0; i < olds.length; i += 1000) await env.RESOURCES.delete(olds.slice(i, i + 1000));
   } catch {
@@ -193,31 +206,57 @@ const LESSON_DELETES = [
   'DELETE FROM resources WHERE lesson = ?',
 ];
 
+// The rows can outlive the objects if a delete is interrupted between the two steps, so a
+// retry must find lesson keys in D1 as well as in the bucket. Table names are constants.
+const LESSON_TABLES = ['comments', 'video_notes', 'pdf_notes', 'watched', 'resources'];
+
+async function lessonKeysUnder(env, p, single) {
+  if (single) return isLessonKey(p) ? [p] : [];
+  const seen = new Set();
+  for (const table of LESSON_TABLES) {
+    const r = await env.DB.prepare(`SELECT DISTINCT lesson FROM ${table}`).all();
+    for (const row of r.results || []) {
+      // `single` is unknown once a file's object is already gone, so match the key itself
+      // as well as everything under a folder prefix.
+      if (typeof row.lesson === 'string' && (row.lesson === p || row.lesson.startsWith(p + '/'))) seen.add(row.lesson);
+    }
+  }
+  return [...seen];
+}
+
 async function deleteEntry(env, rawPath, hooks) {
   const p = cleanPath(rawPath);
   if (p === null || !p) return bad('That name is not valid');
 
   const single = await env.RESOURCES.head(p);
   const objects = single ? [single] : await listAll(env, p + '/');
-  if (!objects.length) return bad('Not found', 404);
   if (objects.length > 5000) return bad('That folder holds too many files to delete in one go', 413);
 
   const keys = objects.map((o) => o.key);
-  const lessons = keys.filter(isLessonKey);
+  const lessons = new Set([...keys.filter(isLessonKey), ...(await lessonKeysUnder(env, p, single))]);
+  if (!keys.length && !lessons.size) {
+    if (p.includes('/') || single) return bad('Not found', 404);
+    const enrolled = await env.DB.prepare('SELECT 1 FROM enrollments WHERE course = ? LIMIT 1').bind(p).first();
+    if (!enrolled) return bad('Not found', 404);
+  }
 
-  for (let i = 0; i < keys.length; i += 1000) await env.RESOURCES.delete(keys.slice(i, i + 1000));
+  try {
+    for (let i = 0; i < keys.length; i += 1000) await env.RESOURCES.delete(keys.slice(i, i + 1000));
+  } catch (e) {
+    return bad('Could not delete the files: ' + (e && e.message ? e.message : e), 500);
+  }
 
-  const statements = lessons.flatMap((k) => LESSON_DELETES.map((sql) => env.DB.prepare(sql).bind(k)));
+  const statements = [...lessons].flatMap((k) => LESSON_DELETES.map((sql) => env.DB.prepare(sql).bind(k)));
   // A deleted course must not keep granting access to nothing.
   if (!single && !p.includes('/')) statements.push(env.DB.prepare('DELETE FROM enrollments WHERE course = ?').bind(p));
   try {
     await runChunks(env, statements);
   } catch (e) {
-    return bad('The files are gone, but their records could not be cleaned up: ' + (e && e.message ? e.message : e), 500);
+    return bad('The files are gone, but some records could not be cleaned up. Run the delete again to finish it. ' + (e && e.message ? e.message : e), 500);
   }
 
   hooks.invalidate();
-  return json({ ok: true, deleted: keys.length });
+  return json({ ok: true, deleted: keys.length, cleaned: lessons.size });
 }
 
 // ---- Folders ----
@@ -304,6 +343,15 @@ async function uploadSingleUrl(env, rawKey, rawSize, overwrite) {
   const url = await presign(env, 'PUT', key);
   if (!url) return bad('Uploads are not configured on this server', 503);
   return json({ url });
+}
+
+// A single PUT finishes in the browser with no callback of its own, so the client tells the
+// Worker afterwards; otherwise the course tree could stay stale for the cache window.
+async function uploadDone(env, rawKey, hooks) {
+  const key = uploadKey(rawKey);
+  if (!key) return bad('That file name is not valid');
+  hooks.invalidate();
+  return json({ ok: true });
 }
 
 async function uploadComplete(env, rawKey, uploadId, parts, hooks) {
@@ -394,6 +442,10 @@ export async function handleFiles(req, env, path, method, url, hooks) {
   if (path === '/api/admin/files/upload/url' && method === 'POST') {
     const b = await req.json().catch(() => ({}));
     return uploadSingleUrl(env, b.key, b.size, b.overwrite);
+  }
+  if (path === '/api/admin/files/upload/done' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return uploadDone(env, b.key, hooks);
   }
   if (path === '/api/admin/files/upload/complete' && method === 'POST') {
     const b = await req.json().catch(() => ({}));

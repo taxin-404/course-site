@@ -20,6 +20,8 @@ export interface UploadJob {
   name: string;
   key: string;
   size: number;
+  /** The file's last-modified time; with name and size it identifies the exact file. */
+  modified: number;
   /** Bytes confirmed uploaded (completed parts plus the current part's progress). */
   loaded: number;
   state: UploadState;
@@ -31,6 +33,7 @@ export interface UploadJob {
 interface Stored {
   key: string;
   size: number;
+  modified: number;
   uploadId: string;
 }
 
@@ -44,14 +47,15 @@ const nameOf = (key: string) => key.slice(key.lastIndexOf('/') + 1);
 export class Uploader {
   readonly jobs = signal<UploadJob[]>([]);
   private nextId = 1;
-  private readonly aborts = new Map<number, () => void>();
+  // One job can have several part PUTs in flight, so each one is tracked separately.
+  private readonly inflight = new Map<number, Set<XMLHttpRequest>>();
 
   constructor(private readonly api: Api, private readonly changed: () => void) {
     // A reload leaves an unfinished multipart upload behind. Show it as paused so the
     // owner can re-select the file and continue from the parts that already landed.
     for (const rec of this.storeAll()) {
       this.jobs.update((list) => [...list, {
-        id: this.nextId++, name: nameOf(rec.key), key: rec.key, size: rec.size, loaded: 0,
+        id: this.nextId++, name: nameOf(rec.key), key: rec.key, size: rec.size, modified: rec.modified, loaded: 0,
         state: 'paused', error: 'Paused — re-select the file to continue.', file: null,
       }]);
     }
@@ -61,9 +65,13 @@ export class Uploader {
   add(files: File[], folder: string): void {
     for (const file of files) {
       const key = folder ? `${folder}/${file.name}` : file.name;
+      // Re-adding the same file to the same place should continue the paused row, not
+      // leave two rows for one key.
+      const waiting = this.jobs().find((j) => j.state === 'paused' && j.key === key && j.size === file.size);
+      if (waiting) { this.resume(waiting.id, file); continue; }
       const id = this.nextId++;
       this.jobs.update((list) => [...list, {
-        id, name: file.name, key, size: file.size, loaded: 0, state: 'waiting', error: '', file,
+        id, name: file.name, key, size: file.size, modified: file.lastModified, loaded: 0, state: 'waiting', error: '', file,
       }]);
       if (!folder) this.fail(id, 'Open a course folder before uploading.');
       else void this.run(id);
@@ -72,7 +80,7 @@ export class Uploader {
 
   /** After a reload the page asks for the file again, then continues where it stopped. */
   resume(id: number, file: File): void {
-    this.patch(id, { file, size: file.size, loaded: 0, error: '', state: 'waiting' });
+    this.patch(id, { file, size: file.size, modified: file.lastModified, loaded: 0, error: '', state: 'waiting' });
     void this.run(id);
   }
 
@@ -93,7 +101,8 @@ export class Uploader {
   }
 
   cancel(id: number): void {
-    this.aborts.get(id)?.();
+    for (const xhr of this.inflight.get(id) ?? []) xhr.abort();
+    this.inflight.delete(id);
     const job = this.get(id);
     if (!job) return;
     // Tell R2 to drop the parts it has kept for us; a failure here only leaves storage
@@ -105,8 +114,8 @@ export class Uploader {
   }
 
   dispose(): void {
-    for (const abort of this.aborts.values()) abort();
-    this.aborts.clear();
+    for (const set of this.inflight.values()) for (const xhr of set) xhr.abort();
+    this.inflight.clear();
   }
 
   private async run(id: number, overwrite = false): Promise<void> {
@@ -128,14 +137,14 @@ export class Uploader {
       }
       if (e instanceof DOMException && e.name === 'AbortError') return;
       this.fail(id, e instanceof Error ? e.message : String(e));
-    } finally {
-      this.aborts.delete(id);
     }
   }
 
   private async single(id: number, job: UploadJob, file: File, overwrite: boolean): Promise<void> {
     const { url } = await this.api.uploadUrl(job.key, file.size, overwrite);
     await this.put(id, url, file, (loaded) => this.patch(id, { loaded }));
+    // A single PUT finishes without a Worker round trip; this drops the course cache.
+    await this.api.uploadDone(job.key);
   }
 
   private async multi(id: number, job: UploadJob, file: File, overwrite: boolean): Promise<void> {
@@ -202,12 +211,13 @@ export class Uploader {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', url);
       xhr.upload.onprogress = (e) => onProgress(e.loaded);
-      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300
+      const settle = () => this.untrack(id, xhr);
+      xhr.onload = () => { settle(); xhr.status >= 200 && xhr.status < 300
         ? resolve()
-        : reject(new Error(`R2 refused the upload (${xhr.status}).`)));
-      xhr.onerror = () => reject(new Error('The upload could not reach R2. Check your connection.'));
-      xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'));
-      this.aborts.set(id, () => xhr.abort());
+        : reject(new Error(`R2 refused the upload (${xhr.status}).`)); };
+      xhr.onerror = () => { settle(); reject(new Error('The upload could not reach R2. Check your connection.')); };
+      xhr.onabort = () => { settle(); reject(new DOMException('Aborted', 'AbortError')); };
+      this.track(id, xhr);
       xhr.send(body);
     });
   }
@@ -218,7 +228,9 @@ export class Uploader {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', url);
       xhr.upload.onprogress = (e) => onProgress(e.loaded);
+      const settle = () => this.untrack(id, xhr);
       xhr.onload = () => {
+        settle();
         if (xhr.status < 200 || xhr.status >= 300) { reject(new Error(`R2 refused part (${xhr.status}).`)); return; }
         const etag = xhr.getResponseHeader('etag') || xhr.getResponseHeader('ETag');
         // Without the CORS expose-header rule the browser hides the ETag and the upload
@@ -226,11 +238,24 @@ export class Uploader {
         if (!etag) { reject(new Error('R2 did not expose the part ETag — the bucket CORS rule needs ExposeHeaders: ETag.')); return; }
         resolve(etag);
       };
-      xhr.onerror = () => reject(new Error('The upload could not reach R2. Check your connection.'));
-      xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'));
-      this.aborts.set(id, () => xhr.abort());
+      xhr.onerror = () => { settle(); reject(new Error('The upload could not reach R2. Check your connection.')); };
+      xhr.onabort = () => { settle(); reject(new DOMException('Aborted', 'AbortError')); };
+      this.track(id, xhr);
       xhr.send(body);
     });
+  }
+
+  private track(id: number, xhr: XMLHttpRequest): void {
+    const set = this.inflight.get(id) ?? new Set<XMLHttpRequest>();
+    set.add(xhr);
+    this.inflight.set(id, set);
+  }
+
+  private untrack(id: number, xhr: XMLHttpRequest): void {
+    const set = this.inflight.get(id);
+    if (!set) return;
+    set.delete(xhr);
+    if (!set.size) this.inflight.delete(id);
   }
 
   private get(id: number): UploadJob | undefined {
@@ -257,17 +282,19 @@ export class Uploader {
   }
 
   private storeFind(job: UploadJob): Stored | undefined {
-    return this.storeAll().find((r) => r.key === job.key && r.size === job.size);
+    // Name, size and last-modified together identify the file. Matching on name and size
+    // alone would splice parts from a different file into the finished object.
+    return this.storeAll().find((r) => r.key === job.key && r.size === job.size && r.modified === job.modified);
   }
 
   private storeSave(job: UploadJob, uploadId: string): void {
-    const rest = this.storeAll().filter((r) => !(r.key === job.key && r.size === job.size));
-    rest.push({ key: job.key, size: job.size, uploadId });
+    const rest = this.storeAll().filter((r) => r.key !== job.key);
+    rest.push({ key: job.key, size: job.size, modified: job.modified, uploadId });
     try { localStorage.setItem(STORE, JSON.stringify(rest)); } catch { /* storage may be full or blocked */ }
   }
 
   private storeDrop(job: UploadJob): void {
-    const rest = this.storeAll().filter((r) => !(r.key === job.key && r.size === job.size));
+    const rest = this.storeAll().filter((r) => r.key !== job.key);
     try { localStorage.setItem(STORE, JSON.stringify(rest)); } catch { /* nothing to do */ }
   }
 }

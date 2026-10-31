@@ -84,8 +84,8 @@ Everything the owner needs for day-to-day content work, without `rclone`:
 
 - **Upload:** pick files or drag them onto the open folder. Small files (up to 16 MiB) go in one request; larger ones are split into 8 MiB parts sent in parallel, and the browser uploads them **straight to R2** with URLs the Worker signs, so a multi-gigabyte video costs the Worker nothing. A name that already exists is refused; choose **Replace** if you mean to overwrite.
 - **Reload mid-upload:** the row shows *Paused — re-select the file*. Choose the same file and only the missing parts are sent. If R2 has already dropped the upload, it starts over and says so.
-- **Rename / move:** a lesson keeps its comments, notes, progress and resources; a course rename also keeps its students' access. A folder cannot be moved inside itself, a lesson cannot be renamed to something the site will not show, and an existing destination is never overwritten.
-- **Delete:** removes the file and its student data; deleting a course also removes its enrollments. Deleting a file cannot be undone, and folders require typing the name to confirm.
+- **Rename / move:** a lesson keeps its comments, notes, progress and resources; a course rename also keeps its students' access. A folder cannot be moved inside itself, a lesson cannot be renamed to something the site will not show, and neither an existing file nor a folder that already holds files is overwritten or merged into.
+- **Delete:** removes the file and its student data; deleting a course also removes its enrollments. If the cleanup is interrupted, running the same delete again finishes it. Deleting a file cannot be undone, and folders require typing the name to confirm.
 - **New folder:** a folder at the top level is a course. An empty folder is held by a hidden zero-byte `.keep`.
 
 Uploads need four Worker secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, optional `R2_BUCKET`) and a bucket CORS rule that exposes `ETag`; both are covered under Deploy. An R2 lifecycle rule on `course-sourse` aborts incomplete multipart uploads after 7 days, so an abandoned upload does not keep paying for parts.

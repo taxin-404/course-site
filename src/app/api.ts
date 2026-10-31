@@ -130,7 +130,8 @@ export class Api {
   // ---- Admin file manager ----
   listFiles(prefix = ''): Promise<FileListing> { return this.req(`admin/files?prefix=${encodeURIComponent(prefix)}`); }
   createFolder(path: string): Promise<unknown> { return this.req('admin/files/folder', { path }); }
-  moveEntry(from: string, to: string, kind: 'file' | 'folder'): Promise<unknown> {
+  /** `warning` is set when the move finished but old files could not be removed yet. */
+  moveEntry(from: string, to: string, kind: 'file' | 'folder'): Promise<{ ok: true; warning?: string }> {
     return this.req('admin/files/move', { from, to, kind });
   }
   deleteEntry(path: string, kind: 'file' | 'folder'): Promise<unknown> { return this.req('admin/files/delete', { path, kind }); }
@@ -143,6 +144,10 @@ export class Api {
   }
   uploadUrl(key: string, size: number, overwrite = false): Promise<{ url: string }> {
     return this.req('admin/files/upload/url', { key, size, overwrite });
+  }
+  /** Small uploads finish in the browser, so this drops the Worker's course cache. */
+  uploadDone(key: string): Promise<unknown> {
+    return this.req('admin/files/upload/done', { key });
   }
   uploadComplete(key: string, uploadId: string, parts: UploadPart[]): Promise<unknown> {
     return this.req('admin/files/upload/complete', { key, uploadId, parts });
