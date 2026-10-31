@@ -28,10 +28,12 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
 @Component({
   selector: 'app-pdf-viewer',
   imports: [NgxExtendedPdfViewerModule],
+  host: { '[class.expanded]': 'expanded()' },
   template: `
     <div class="notes-bar">
       <span class="notes-hint">🔒 Your notes are private. Only you can see them.</span>
       <span class="notes-status">{{ status() }}</span>
+      <button type="button" (click)="toggleExpanded()">{{ expanded() ? '⤡ Exit full window' : '⤢ Full window' }}</button>
       <button type="button" (click)="toggleHidden()" [disabled]="!ready()">{{ hidden() ? 'Show my notes' : 'Hide my notes' }}</button>
       <button type="button" class="reset" (click)="reset()" [disabled]="!ready()">Reset to original</button>
     </div>
@@ -81,6 +83,7 @@ export class PdfViewer {
   protected readonly theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   readonly key = input.required<string>();
   protected readonly url = computed(() => this.api.mediaUrl(this.key()));
+  protected readonly expanded = signal(false); // fills the browser window (not the whole screen)
   protected readonly hidden = signal(false);
   protected readonly ready = signal(false);
   protected readonly status = signal('');
@@ -93,11 +96,19 @@ export class PdfViewer {
     const block = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['s', 'p'].includes(e.key?.toLowerCase())) { e.preventDefault(); e.stopImmediatePropagation(); }
     };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && this.expanded()) this.toggleExpanded(); };
     window.addEventListener('keydown', block, true);
+    window.addEventListener('keydown', esc);
     inject(DestroyRef).onDestroy(() => {
       window.removeEventListener('keydown', block, true);
+      window.removeEventListener('keydown', esc);
       if (this.timer) { clearTimeout(this.timer); void this.save(); }
     });
+  }
+
+  protected toggleExpanded(): void {
+    this.expanded.update((v) => !v);
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 50); // let the PDF re-fit to the new size
   }
 
   private current(): object[] {
