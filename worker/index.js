@@ -133,12 +133,15 @@ const validPw = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200
 const VIDEO_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|m3u8)$/i;
 const MEDIA_TYPES = { m3u8: 'application/vnd.apple.mpegurl', ts: 'video/mp2t', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', m4v: 'video/mp4' };
 let cache = { at: 0, data: null };
+// Called after any admin file change so the site reflects it immediately instead of
+// waiting out the 60 s window below.
+export function invalidateCourse() { cache = { at: 0, data: null }; }
 const NUM = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 async function listCourse(env) {
   if (cache.data && Date.now() - cache.at < 60000) return cache.data;
   const keys = []; let cursor;
   do {
-    const r = await env.VIDEOS.list({ cursor, limit: 1000 });
+    const r = await env.RESOURCES.list({ cursor, limit: 1000 });
     keys.push(...r.objects.map((o) => o.key)); cursor = r.truncated ? r.cursor : undefined;
   } while (cursor);
 
@@ -275,7 +278,7 @@ async function serve(req, env, key, u) {
       range = { offset: start, length: Math.min(end - start + 1, CHUNK) };
     }
   }
-  const obj = await env.VIDEOS.get(key, { range });
+  const obj = await env.RESOURCES.get(key, { range });
   if (!obj) return json({ error: 'File not found' }, 404);
   const h = new Headers();
   h.set('content-type', MEDIA_TYPES[key.split('.').pop().toLowerCase()] || 'application/octet-stream');

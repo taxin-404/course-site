@@ -17,3 +17,12 @@ ADMIN_PASSWORD=replace-with-a-strong-password
 # MAX_LESSONS_PER_HOUR=20        # distinct lessons a student can open per hour (admins exempt)
 # MAX_MBPS=12                    # per-student media speed cap (Mbit/s); higher = fewer buffering risks, faster downloads
 # RELAX_FETCH_METADATA=1         # only if an old browser cannot play media (turns off the Sec-Fetch check)
+
+# R2 S3 credentials for the admin file manager. These sign the browser's uploads directly to
+# R2's S3 endpoint (the file bytes never pass through the Worker), so they are optional:
+# without them everything else still works and only uploads are refused.
+# Create an R2 API token with Object Read & Write on the bucket, and copy its values here.
+# R2_ACCOUNT_ID=0123456789abcdef0123456789abcdef
+# R2_ACCESS_KEY_ID=replace-with-the-access-key-id
+# R2_SECRET_ACCESS_KEY=replace-with-the-secret-access-key
+# R2_BUCKET=course-sourse

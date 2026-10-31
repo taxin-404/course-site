@@ -12,5 +12,5 @@ binding = "DB"
 database_name = "course-db"
 
 [[r2_buckets]]
-binding = "VIDEOS"
+binding = "RESOURCES"
 bucket_name = "course-sourse"
