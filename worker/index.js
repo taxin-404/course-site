@@ -17,6 +17,7 @@ async function hashPw(pw) {
   return b64(salt) + '.' + (await derive(pw, salt));
 }
 async function checkPw(pw, stored) {
+  if (!stored.includes('.')) return false;
   const [s, h] = stored.split('.');
   return safeEq(h, await derive(pw, unb64(s)));
 }
@@ -48,7 +49,40 @@ async function seedAdmin(env) {
   if (!u) await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, 1)').bind(email, await hashPw(String(env.ADMIN_PASSWORD))).run();
   else if (!u.is_admin) await env.DB.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').bind(u.id).run();
 }
-const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => seedAdmin(env)).catch((e) => { ready = null; throw e; }));
+async function migrate(env) {
+  const has = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'google_sub'").first();
+  if (!has.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN google_sub TEXT').run();
+  await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)').run();
+}
+const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => migrate(env)).then(() => seedAdmin(env)).catch((e) => { ready = null; throw e; }));
+
+// ---- Google sign-in: verify the ID token (RS256 JWT) against Google's public keys ----
+let jwks = { at: 0, keys: [] };
+async function googleKeys(force) {
+  if (!force && jwks.keys.length && Date.now() - jwks.at < 36e5) return jwks.keys;
+  const r = await fetch('https://www.googleapis.com/oauth2/v3/certs');
+  if (!r.ok) throw new Error('jwks');
+  jwks = { at: Date.now(), keys: (await r.json()).keys || [] };
+  return jwks.keys;
+}
+const jpart = (s) => JSON.parse(new TextDecoder().decode(unb64(s)));
+async function verifyGoogle(token, env) {
+  const [h, p, sig] = token.split('.');
+  if (!h || !p || !sig) return null;
+  const head = jpart(h);
+  if (head.alg !== 'RS256') return null;
+  let jwk = (await googleKeys()).find((k) => k.kid === head.kid) || (await googleKeys(true)).find((k) => k.kid === head.kid);
+  if (!jwk) return null;
+  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  if (!(await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, unb64(sig), enc.encode(h + '.' + p)))) return null;
+  const c = jpart(p);
+  const okIss = c.iss === 'https://accounts.google.com' || c.iss === 'accounts.google.com';
+  if (!okIss || c.aud !== env.GOOGLE_CLIENT_ID || !(c.exp * 1000 > Date.now())) return null;
+  if (!(c.email_verified === true || c.email_verified === 'true') || !c.email || !c.sub) return null;
+  return c;
+}
+// Google-only users get a marker that never matches any password (no costly hashing needed).
+const unusablePw = async () => '!';
 const isOwner = (env, email) => !!env.ADMIN_EMAIL && email === String(env.ADMIN_EMAIL).trim().toLowerCase();
 const validEmail = (e) => typeof e === 'string' && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 const validPw = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
@@ -128,6 +162,21 @@ export default {
     const m = req.method;
     try {
       await ensureSchema(env);
+      if (path === '/api/config') return json({ googleClientId: env.GOOGLE_CLIENT_ID || '' });
+      if (path === '/api/login/google' && m === 'POST') {
+        if (!env.GOOGLE_CLIENT_ID) return json({ error: 'Google sign-in is not set up' }, 503);
+        const { credential } = await req.json();
+        const c = await verifyGoogle(String(credential || ''), env).catch(() => null);
+        if (!c) return json({ error: 'Google sign-in failed' }, 401);
+        let u = await env.DB.prepare('SELECT id, email, google_sub FROM users WHERE google_sub = ?').bind(c.sub).first();
+        if (!u) {
+          u = await env.DB.prepare('SELECT id, email, google_sub FROM users WHERE email = ?').bind(c.email.toLowerCase()).first();
+          if (!u) return json({ error: 'This Google account has not been invited' }, 403);
+          if (u.google_sub && u.google_sub !== c.sub) return json({ error: 'This email is linked to a different Google account' }, 403);
+          await env.DB.prepare('UPDATE users SET google_sub = ? WHERE id = ?').bind(c.sub, u.id).run();
+        }
+        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u.id, env) });
+      }
       if (path === '/api/login' && m === 'POST') {
         const { email, password } = await req.json();
         const u = await env.DB.prepare('SELECT id, pass FROM users WHERE email = ?').bind(String(email).toLowerCase()).first();
@@ -159,16 +208,47 @@ export default {
       if (path.startsWith('/api/admin/')) {
         if (!u.is_admin) return json({ error: 'Admins only' }, 403);
         if (path === '/api/admin/users' && m === 'GET') {
-          const rows = (await env.DB.prepare('SELECT u.id, u.email, u.is_admin, (SELECT COUNT(*) FROM watched w WHERE w.user_id = u.id) AS watched FROM users u ORDER BY u.is_admin DESC, u.email').all()).results;
+          const rows = (await env.DB.prepare('SELECT u.id, u.email, u.is_admin, (SELECT COUNT(*) FROM watched w WHERE w.user_id = u.id) AS watched, (u.google_sub IS NOT NULL) AS google FROM users u ORDER BY u.is_admin DESC, u.email').all()).results;
           return json(rows.map((r) => ({ ...r, owner: isOwner(env, r.email) })));
         }
         if (path === '/api/admin/users' && m === 'POST') {
           const b = await req.json();
           const email = String(b.email || '').trim().toLowerCase();
           if (!validEmail(email)) return json({ error: 'Enter a valid email' }, 400);
-          if (!validPw(b.password)) return json({ error: 'Password must be 8+ characters' }, 400);
-          await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, ?)').bind(email, await hashPw(b.password), b.is_admin ? 1 : 0).run();
+          if (!b.google_only && !validPw(b.password)) return json({ error: 'Password must be 8+ characters' }, 400);
+          const pass = b.google_only ? await unusablePw() : await hashPw(b.password);
+          await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, ?)').bind(email, pass, b.is_admin ? 1 : 0).run();
           return json({ ok: true });
+        }
+        if (path === '/api/admin/users/bulk' && m === 'POST') {
+          const b = await req.json();
+          const googleOnly = !!b.google_only;
+          const max = googleOnly ? 500 : 20; // password hashing is CPU heavy, so password batches are small
+          const seen = new Set(); const skipped = []; const todo = [];
+          for (const raw of Array.isArray(b.emails) ? b.emails : []) {
+            const email = String(raw).trim().toLowerCase();
+            if (!email || seen.has(email)) continue;
+            seen.add(email);
+            if (!validEmail(email)) skipped.push({ email, reason: 'invalid email' }); else todo.push(email);
+          }
+          if (todo.length > max) return json({ error: `Send at most ${max} emails per request` }, 400);
+          const ALPHA = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+          const mkPw = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (x) => ALPHA[x % ALPHA.length]).join('');
+          const rows = [];
+          for (const email of todo) {
+            const password = googleOnly ? null : mkPw();
+            rows.push({ email, password, hash: googleOnly ? await unusablePw() : await hashPw(password) });
+          }
+          const added = [];
+          for (let i = 0; i < rows.length; i += 50) {
+            const part = rows.slice(i, i + 50);
+            const res = await env.DB.batch(part.map((r) => env.DB.prepare('INSERT OR IGNORE INTO users (email, pass, is_admin) VALUES (?, ?, ?)').bind(r.email, r.hash, b.is_admin ? 1 : 0)));
+            part.forEach((r, j) => {
+              if (res[j].meta.changes) added.push(googleOnly ? { email: r.email } : { email: r.email, password: r.password });
+              else skipped.push({ email: r.email, reason: 'already exists' });
+            });
+          }
+          return json({ added, skipped });
         }
         const mm = /^\/api\/admin\/users\/(\d+)(?:\/(password|role))?$/.exec(path);
         if (mm) {
