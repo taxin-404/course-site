@@ -15,6 +15,16 @@ import { Api, AdminUser, BulkResult } from './api';
       </div>
 
       <section class="ac">
+        <h3>Courses for new users</h3>
+        <p class="sub">Tick the courses that users added below (single or many) can open.</p>
+        <div class="bf">
+          @for (c of courseList(); track c) {
+            <label class="chk"><input type="checkbox" [checked]="pick().includes(c)" (change)="togglePick(c)" /><span>{{ c }}</span></label>
+          } @empty { <span class="hint">No courses found in the bucket yet.</span> }
+        </div>
+      </section>
+
+      <section class="ac">
         <h3>Add user</h3>
         <form class="af" (ngSubmit)="add()">
           <input name="email" type="email" placeholder="Email" autocomplete="off" [(ngModel)]="email" required />
@@ -62,17 +72,25 @@ import { Api, AdminUser, BulkResult } from './api';
             <span class="av">{{ u.email.charAt(0).toUpperCase() }}</span>
             <div class="who">
               <strong>{{ u.email }}</strong>
-              <small>{{ u.watched }} lesson{{ u.watched === 1 ? '' : 's' }} done</small>
+              <small>{{ u.watched }} lesson{{ u.watched === 1 ? '' : 's' }} done · {{ u.is_admin ? 'all courses' : u.courses.length + ' course' + (u.courses.length === 1 ? '' : 's') }}</small>
             </div>
             @if (u.google) { <span class="badge g" title="Linked to a Google account">Google</span> }
             <span class="badge" [class.adm]="u.is_admin">{{ u.owner ? 'Owner' : u.is_admin ? 'Admin' : 'Student' }}</span>
             <div class="acts">
+              @if (!u.is_admin) { <button type="button" (click)="editing.set(editing() === u.id ? null : u.id)">Courses</button> }
               <button type="button" (click)="reset(u)">Reset password</button>
               @if (!u.owner && u.id !== api.me()?.id) {
                 <button type="button" (click)="toggle(u)">{{ u.is_admin ? 'Remove admin' : 'Make admin' }}</button>
                 <button type="button" class="d" (click)="remove(u)">Delete</button>
               }
             </div>
+            @if (editing() === u.id) {
+              <div class="courses-edit">
+                @for (c of courseList(); track c) {
+                  <label class="chk"><input type="checkbox" [checked]="u.courses.includes(c)" (change)="setCourse(u, c, $any($event.target).checked)" /><span>{{ c }}</span></label>
+                }
+              </div>
+            }
           </div>
         }
       </section>
@@ -92,11 +110,24 @@ export class Admin implements OnInit {
   protected bulkText = '';
   protected bulkGoogle = true;
   protected bulkAdmin = false;
+  protected readonly courseList = signal<string[]>([]);
+  protected readonly pick = signal<string[]>([]);
+  protected readonly editing = signal<number | null>(null);
   protected readonly bulkCount = signal(0);
   protected readonly bulkBusy = signal(false);
   protected readonly result = signal<BulkResult | null>(null);
 
-  ngOnInit(): void { void this.load(); }
+  ngOnInit(): void {
+    void this.load();
+    this.api.adminCourses().then((c) => this.courseList.set(c)).catch(() => undefined);
+  }
+
+  protected togglePick(c: string): void { this.pick.update((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c])); }
+
+  protected async setCourse(u: AdminUser, c: string, on: boolean): Promise<void> {
+    const next = on ? [...u.courses, c] : u.courses.filter((x) => x !== c);
+    await this.run(() => this.api.setCourses(u.id, next), 'Courses updated');
+  }
 
   private async load(): Promise<void> {
     try { this.users.set(await this.api.listUsers()); } catch (e) { this.message.set((e as Error).message); }
@@ -107,7 +138,7 @@ export class Admin implements OnInit {
   }
 
   protected async add(): Promise<void> {
-    await this.run(() => this.api.addUser(this.email, this.password, this.isAdmin, this.googleOnly), 'User added');
+    await this.run(() => this.api.addUser(this.email, this.password, this.isAdmin, this.googleOnly, this.pick()), 'User added');
     if (!this.isError()) { this.email = ''; this.password = ''; this.isAdmin = false; this.googleOnly = false; }
   }
 
@@ -148,7 +179,7 @@ export class Admin implements OnInit {
     this.result.set(null);
     try {
       for (let i = 0; i < emails.length; i += size) {
-        const r = await this.api.bulkAdd(emails.slice(i, i + size), this.bulkGoogle, this.bulkAdmin);
+        const r = await this.api.bulkAdd(emails.slice(i, i + size), this.bulkGoogle, this.bulkAdmin, this.pick());
         total.added.push(...r.added);
         total.skipped.push(...r.skipped);
         this.result.set({ added: [...total.added], skipped: [...total.skipped] });
