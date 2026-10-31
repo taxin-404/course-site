@@ -1,3 +1,5 @@
+import { handleFiles } from './files.js';
+
 const enc = new TextEncoder();
 const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
@@ -640,6 +642,8 @@ const handle = async (req, env) => {
             return json({ ok: true });
           }
         }
+        const handled = await handleFiles(req, env, path, m, new URL(req.url), { invalidate: invalidateCourse });
+        if (handled) return handled;
       }
       return json({ error: 'Not found' }, 404);
     } catch (e) {
