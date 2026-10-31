@@ -3,29 +3,28 @@ import { Api, AdminUser, BulkResult } from './api';
 
 type SortKey = 'email' | 'progress' | 'courses';
 type RoleFilter = 'all' | 'student' | 'admin';
+type SignKey = 'any' | 'google' | 'password';
+type CourseMode = 'any' | 'all' | 'missing';
 interface Confirm { title: string; body: string; label: string; danger: boolean; run: () => void | Promise<void> }
 interface Toast { id: number; text: string; bad: boolean }
 
 const PW_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
 
-// The default course access is a convenience preset, remembered per browser so adding
-// several batches of students does not mean re-ticking the same courses every time.
-const PICK_KEY = 'course-site.admin.defaultCourses';
-function readPick(): string[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(PICK_KEY) || '[]');
-    return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-function savePick(pick: string[]): void {
-  try { localStorage.setItem(PICK_KEY, JSON.stringify(pick)); } catch { /* private mode: keep it in memory only */ }
-}
 const ROLES: { key: RoleFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'student', label: 'Students' },
   { key: 'admin', label: 'Admins' },
+];
+const SIGNINS: { key: SignKey; label: string }[] = [
+  { key: 'any', label: 'Any' },
+  { key: 'google', label: 'Google' },
+  { key: 'password', label: 'Password' },
+];
+/** How the ticked courses must match a user. 'missing' answers "who still needs access?". */
+const MODES: { key: CourseMode; label: string }[] = [
+  { key: 'any', label: 'Any of' },
+  { key: 'all', label: 'All of' },
+  { key: 'missing', label: 'Missing' },
 ];
 
 @Component({
@@ -36,10 +35,7 @@ const ROLES: { key: RoleFilter; label: string }[] = [
       <div class="adm-top">
         <div>
           <h1>Admin</h1>
-          <p class="adm-sub">
-            {{ filtered().length }} of {{ users().length }} user{{ users().length === 1 ? '' : 's' }} shown
-            · {{ admins() }} admin{{ admins() === 1 ? '' : 's' }}
-          </p>
+          <p class="adm-sub">Search and filter below; the matching users are listed underneath.</p>
         </div>
         <div class="adm-top-actions">
           <button type="button" class="adm-ico" title="Refresh" aria-label="Refresh list" [disabled]="loading()" (click)="refresh()">
@@ -62,36 +58,18 @@ const ROLES: { key: RoleFilter; label: string }[] = [
         <div class="stat"><b>{{ courseList().length }}</b><span>Courses</span></div>
       </section>
 
-      <!-- Default access for new users -->
-      <section class="adm-card">
-        <button type="button" class="adm-card-head" [attr.aria-expanded]="showDefaults()" [title]="pick().length ? pick().join(', ') : 'No default courses'" (click)="showDefaults.set(!showDefaults())">
-          <span class="adm-card-title">
-            <strong>Default course access</strong>
-            <small>{{ pickSummary() }}</small>
-          </span>
-          <span class="adm-caret" [class.open]="showDefaults()">▾</span>
-        </button>
-        @if (showDefaults()) {
-          <div class="adm-card-body">
-            <p class="adm-muted sm">Pre-ticked in Add users; adjust per batch.</p>
-            <div class="adm-chips">
-              @for (c of courseList(); track c) {
-                <label class="chip" [class.on]="pick().includes(c)">
-                  <input type="checkbox" [checked]="pick().includes(c)" (change)="togglePick(c)" />
-                  <span>{{ c }}</span>
-                </label>
-              } @empty {
-                <span class="adm-muted">No courses found in the bucket yet.</span>
-              }
-            </div>
-          </div>
-        }
-      </section>
+      <!-- Filters: every filter lives here, the results follow below -->
+      <section class="adm-card adm-filters" aria-label="Filters">
+        <div class="adm-filters-top">
+          <h2>Filters</h2>
+          @if (filterCount()) {
+            <button type="button" class="link" (click)="clearFilters()">Clear {{ filterCount() }} filter{{ filterCount() === 1 ? '' : 's' }}</button>
+          }
+        </div>
 
-      <!-- Toolbar -->
-      <div class="adm-toolbar">
+        <div class="adm-fgrid">
         <label class="adm-search">
-          <span aria-hidden="true">⌕</span>
+          <svg class="adm-mag" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
           <input type="search" placeholder="Search by email…" aria-label="Search users by email" [value]="search()" (input)="search.set($any($event.target).value)" />
         </label>
         <div class="seg" role="group" aria-label="Filter by role">
@@ -99,12 +77,52 @@ const ROLES: { key: RoleFilter; label: string }[] = [
             <button type="button" [class.on]="role() === r.key" (click)="role.set(r.key)">{{ r.label }}</button>
           }
         </div>
+        <div class="seg" role="group" aria-label="Filter by sign-in method">
+          @for (k of signins; track k.key) {
+            <button type="button" [class.on]="signin() === k.key" (click)="signin.set(k.key)">{{ k.label }}</button>
+          }
+        </div>
+
         <select class="adm-sort" aria-label="Sort users" [value]="sort()" (change)="sort.set($any($event.target).value)">
           <option value="email">Email A–Z</option>
           <option value="progress">Most progress</option>
           <option value="courses">Most courses</option>
         </select>
-      </div>
+        </div>
+
+        <div class="adm-fcourses">
+          <div class="adm-fcourses-top">
+            <span class="adm-flabel">Course access</span>
+            <div class="seg" role="group" aria-label="How the selected courses must match">
+              @for (k of modes; track k.key) {
+                <button type="button" [class.on]="courseMode() === k.key" [disabled]="!courseFilter().length" (click)="courseMode.set(k.key)">{{ k.label }}</button>
+              }
+            </div>
+          </div>
+
+          @if (manyCourses()) {
+            <label class="adm-search sm">
+              <svg class="adm-mag" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+              <input type="search" placeholder="Search courses..." aria-label="Search courses" [value]="courseQuery()" (input)="courseQuery.set($any($event.target).value)" />
+            </label>
+          }
+
+          <div class="adm-chips scroll">
+            @for (c of visibleCourses(); track c) {
+              <label class="chip" [class.on]="courseFilter().includes(c)">
+                <input type="checkbox" [checked]="courseFilter().includes(c)" (change)="toggleCourseFilter(c)" />
+                <span>{{ c }}</span>
+              </label>
+            } @empty {
+              <span class="adm-muted">{{ courseQuery().trim() ? 'No course matches your search.' : 'No courses found in the bucket yet.' }}</span>
+            }
+          </div>
+
+          @if (courseFilter().length) {
+            <p class="adm-muted sm">{{ courseFilter().length }} course{{ courseFilter().length === 1 ? '' : 's' }} selected — {{ modeHint() }}.</p>
+          }
+        </div>
+      </section>
 
       <!-- Bulk actions -->
       @if (selected().size) {
@@ -117,8 +135,12 @@ const ROLES: { key: RoleFilter; label: string }[] = [
         </div>
       }
 
-      <!-- User list -->
-      <section class="adm-card adm-list">
+      <!-- Results -->
+      <section class="adm-card adm-list" aria-label="Results">
+        <div class="adm-results-top">
+          <h2>Results</h2>
+          <span class="adm-muted sm">{{ filtered().length }} of {{ users().length }} user{{ users().length === 1 ? '' : 's' }}</span>
+        </div>
         <div class="adm-lhead">
           <label class="adm-check">
             <input type="checkbox" aria-label="Select all users" [checked]="allSelected()" (change)="toggleAll($any($event.target).checked)" />
@@ -270,12 +292,18 @@ const ROLES: { key: RoleFilter; label: string }[] = [
             </div>
 
             <div class="field">
-              <span>Course access</span>
-              <div class="adm-chips">
-                @for (c of courseList(); track c) {
+              <span>Course access @if (newCourses().length) { <em>· {{ newCourses().length }} selected</em> }</span>
+              @if (manyCourses()) {
+                <label class="adm-search sm">
+                  <svg class="adm-mag" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+                  <input type="search" placeholder="Search courses..." aria-label="Search courses for this user" [value]="newCourseQuery()" (input)="newCourseQuery.set($any($event.target).value)" />
+                </label>
+              }
+              <div class="adm-chips scroll">
+                @for (c of newCourseVisible(); track c) {
                   <label class="chip" [class.on]="newCourses().includes(c)"><input type="checkbox" [checked]="newCourses().includes(c)" (change)="toggleNewCourse(c)" /><span>{{ c }}</span></label>
                 } @empty {
-                  <span class="adm-muted">No courses found.</span>
+                  <span class="adm-muted">{{ newCourseQuery().trim() ? 'No course matches your search.' : 'No courses found.' }}</span>
                 }
               </div>
             </div>
@@ -299,11 +327,17 @@ const ROLES: { key: RoleFilter; label: string }[] = [
 
             <div class="field">
               <span>Course access @if (bulkCount()) { <em>· {{ bulkCount() }} valid email{{ bulkCount() === 1 ? '' : 's' }} found</em> }</span>
-              <div class="adm-chips">
-                @for (c of courseList(); track c) {
+              @if (manyCourses()) {
+                <label class="adm-search sm">
+                  <svg class="adm-mag" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+                  <input type="search" placeholder="Search courses..." aria-label="Search courses for these users" [value]="bulkCourseQuery()" (input)="bulkCourseQuery.set($any($event.target).value)" />
+                </label>
+              }
+              <div class="adm-chips scroll">
+                @for (c of bulkCourseVisible(); track c) {
                   <label class="chip" [class.on]="bulkCourses().includes(c)"><input type="checkbox" [checked]="bulkCourses().includes(c)" (change)="toggleBulkCourse(c)" /><span>{{ c }}</span></label>
                 } @empty {
-                  <span class="adm-muted">No courses found.</span>
+                  <span class="adm-muted">{{ bulkCourseQuery().trim() ? 'No course matches your search.' : 'No courses found.' }}</span>
                 }
               </div>
             </div>
@@ -393,16 +427,15 @@ export class Admin implements OnInit {
 
   protected readonly search = signal('');
   protected readonly role = signal<RoleFilter>('all');
+  protected readonly signin = signal<SignKey>('any');
   protected readonly sort = signal<SortKey>('email');
-  protected readonly showDefaults = signal(true);
-  protected readonly pick = signal<string[]>(readPick());
-  /** Shown on the collapsed card: which courses, or that there are none. Kept short so it
-   *  still fits on a phone; the full list is the tooltip and the open card. */
-  protected readonly pickSummary = computed(() => {
-    const p = this.pick();
-    if (!p.length) return 'None — new users get no courses';
-    return p.length === 1 ? p[0] : `${p[0]} +${p.length - 1} more`;
-  });
+
+  // Course filter: any number of ticked courses, plus how they must match.
+  protected readonly courseFilter = signal<string[]>([]);
+  protected readonly courseMode = signal<CourseMode>('any');
+  protected readonly courseQuery = signal('');
+  protected readonly newCourseQuery = signal('');
+  protected readonly bulkCourseQuery = signal('');
 
   protected readonly selected = signal<Set<number>>(new Set());
 
@@ -435,19 +468,66 @@ export class Admin implements OnInit {
   protected readonly toasts = signal<Toast[]>([]);
 
   protected readonly roles = ROLES;
+  protected readonly signins = SIGNINS;
+  protected readonly modes = MODES;
 
   protected readonly admins = computed(() => this.users().filter((u) => u.is_admin).length);
   protected readonly students = computed(() => this.users().filter((u) => !u.is_admin).length);
   protected readonly googleCount = computed(() => this.users().filter((u) => u.google).length);
   protected readonly watchedTotal = computed(() => this.users().reduce((n, u) => n + u.watched, 0));
 
-  /** Users after the search text, role filter and sort. The owner is always pinned to the top. */
+  /** Courses matching the search, with the ticked ones pinned first so a selection can
+   *  never be hidden by the query — and stays visible when the list is long. */
+  private orderCourses(list: string[], query: string, picked: string[]): string[] {
+    const t = query.trim().toLowerCase();
+    const matched = t ? list.filter((c) => c.toLowerCase().includes(t)) : list;
+    return [...matched.filter((c) => picked.includes(c)), ...matched.filter((c) => !picked.includes(c))];
+  }
+  protected readonly visibleCourses = computed(() => this.orderCourses(this.courseList(), this.courseQuery(), this.courseFilter()));
+  protected readonly newCourseVisible = computed(() => this.orderCourses(this.courseList(), this.newCourseQuery(), this.newCourses()));
+  protected readonly bulkCourseVisible = computed(() => this.orderCourses(this.courseList(), this.bulkCourseQuery(), this.bulkCourses()));
+
+  /** The course search box only appears once the list is long enough to need it. */
+  protected readonly manyCourses = computed(() => this.courseList().length > 6);
+
+  /** How many filters are narrowing the list, for the "Clear N filters" button. */
+  protected readonly filterCount = computed(() => {
+    let n = 0;
+    if (this.search().trim()) n++;
+    if (this.role() !== 'all') n++;
+    if (this.signin() !== 'any') n++;
+    if (this.courseFilter().length) n++;
+    return n;
+  });
+
+  /** Plain-language echo of the course match mode, shown under the chips. */
+  protected readonly modeHint = computed(() => {
+    const one = this.courseFilter().length === 1;
+    if (this.courseMode() === 'all') return `showing users with ${one ? 'it' : 'all of them'}`;
+    if (this.courseMode() === 'missing') return `showing users missing ${one ? 'it' : 'at least one'}`;
+    return `showing users with ${one ? 'it' : 'any of them'}`;
+  });
+
+  /** Users after every filter and the sort. The owner is always pinned to the top. */
   protected readonly filtered = computed(() => {
     const q = this.search().trim().toLowerCase();
     const role = this.role();
-    const list = this.users().filter(
-      (u) => (!q || u.email.toLowerCase().includes(q)) && (role === 'all' || (role === 'admin' ? !!u.is_admin : !u.is_admin)),
-    );
+    const signin = this.signin();
+    const courses = this.courseFilter();
+    const mode = this.courseMode();
+    const list = this.users().filter((u) => {
+      if (q && !u.email.toLowerCase().includes(q)) return false;
+      if (role !== 'all' && (role === 'admin' ? !u.is_admin : !!u.is_admin)) return false;
+      if (signin !== 'any' && (signin === 'google' ? !u.google : !!u.google)) return false;
+      if (courses.length) {
+        // Admins can open every course, so they always count as having access.
+        const have = courses.filter((c) => u.is_admin || u.courses.includes(c)).length;
+        if (mode === 'any' && !have) return false;
+        if (mode === 'all' && have !== courses.length) return false;
+        if (mode === 'missing' && have === courses.length) return false;
+      }
+      return true;
+    });
     const cmp: Record<SortKey, (a: AdminUser, b: AdminUser) => number> = {
       email: (a, b) => a.email.localeCompare(b.email),
       progress: (a, b) => b.watched - a.watched || a.email.localeCompare(b.email),
@@ -476,10 +556,13 @@ export class Admin implements OnInit {
       .adminCourses()
       .then((c) => {
         this.courseList.set(c);
-        // Drop remembered courses that no longer exist in the bucket, so a renamed or
-        // deleted course is never handed out as a default again.
-        const keep = this.pick().filter((x) => c.includes(x));
-        if (keep.length !== this.pick().length) { this.pick.set(keep); savePick(keep); }
+        // Drop ticked courses that no longer exist, so a deleted or renamed course never
+        // leaves the filter matching nothing.
+        const keep = this.courseFilter().filter((x) => c.includes(x));
+        if (keep.length !== this.courseFilter().length) {
+          this.courseFilter.set(keep);
+          if (!keep.length) this.courseMode.set('any');
+        }
       })
       .catch(() => this.toast('Could not load the course list.', true));
   }
@@ -521,10 +604,17 @@ export class Admin implements OnInit {
     this.selected.set(new Set());
   }
 
-  // ---- default access / drawer ------------------------------------------
-  protected togglePick(c: string): void {
-    this.pick.update((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
-    savePick(this.pick());
+  // ---- course filter / drawer -------------------------------------------
+  protected toggleCourseFilter(c: string): void {
+    this.courseFilter.update((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
+  }
+  protected clearFilters(): void {
+    this.search.set('');
+    this.role.set('all');
+    this.signin.set('any');
+    this.courseFilter.set([]);
+    this.courseMode.set('any');
+    this.courseQuery.set('');
   }
 
   protected open(u: AdminUser): void {
@@ -689,8 +779,10 @@ export class Admin implements OnInit {
     this.newPassword = '';
     this.newGoogle = false;
     this.newAdmin = false;
-    this.newCourses.set([...this.pick()]);
-    this.bulkCourses.set([...this.pick()]);
+    this.newCourses.set([]);
+    this.bulkCourses.set([]);
+    this.newCourseQuery.set('');
+    this.bulkCourseQuery.set('');
     this.bulkText.set('');
     this.bulkResult.set(null);
     this.bulkDone.set(0);

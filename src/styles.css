@@ -134,15 +134,6 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 
 /* Card */
 .adm-card{background:var(--panel);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
-.adm-card-head{display:flex;width:100%;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.2rem;background:none;border:0;border-radius:0;box-shadow:none;text-align:left}
-.adm-card-head:hover{background:var(--acc-soft);box-shadow:none}
-.adm-card-title{display:grid;gap:.1rem;min-width:0}
-.adm-card-title strong{font-weight:650}
-.adm-card-title small{color:var(--mute);font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.adm-caret{color:var(--mute);transition:transform .18s}
-.adm-caret.open{transform:rotate(180deg)}
-.adm-card-body{padding:0 1.2rem 1.1rem}
-.adm-card-body .adm-muted.sm{margin:0 0 .7rem}
 
 /* Chips / checkboxes */
 .adm-chips{display:flex;flex-wrap:wrap;gap:.5rem}
@@ -155,9 +146,8 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 .chip.file input{position:absolute;inset:0;width:100%;opacity:0;cursor:pointer}
 
 /* Toolbar */
-.adm-toolbar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
 .adm-search{display:flex;align-items:center;gap:.5rem;flex:1;min-width:220px;padding:.1rem .75rem;background:var(--panel);border-radius:12px;box-shadow:var(--shadow-sm)}
-.adm-search span{color:var(--mute)}
+.adm-search .adm-mag{width:16px;height:16px;flex:none;fill:none;stroke:var(--mute);stroke-width:2;stroke-linecap:round}
 .adm-search:focus-within{box-shadow:0 0 0 3px var(--acc-soft),var(--shadow-sm)}
 .adm-search input{border:0;background:none;padding:.55rem 0;box-shadow:none}
 .adm-search input:focus{box-shadow:none}
@@ -166,6 +156,23 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 .seg button:hover{background:var(--acc-soft);box-shadow:none}
 .seg button.on{background:var(--acc-soft);color:var(--acc);font-weight:600}
 .adm-sort{padding:.55rem .75rem;border:0;border-radius:12px;background:var(--panel);color:inherit;box-shadow:var(--shadow-sm)}
+
+/* Filter card: every filter sits in here, the result list follows below */
+.adm-filters{display:grid;gap:.9rem;padding:1rem 1.2rem 1.1rem}
+.adm-filters-top{display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.adm-filters-top h2{font-size:1rem;margin:0;font-weight:650}
+.adm-filters-top .link{padding:.25rem .45rem;font-size:.85rem}
+.adm-fgrid{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.adm-fgrid .adm-search{min-width:230px}
+.adm-fgrid .adm-sort{margin-left:auto}
+.adm-fcourses{display:grid;gap:.6rem;padding-top:.9rem;border-top:1px solid var(--line)}
+.adm-fcourses-top{display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
+.adm-flabel{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);font-weight:650}
+.adm-search.sm{flex:0 1 270px;min-width:190px;padding:0 .65rem;border-radius:10px}
+.adm-search.sm input{padding:.4rem 0;font-size:.88rem}
+.adm-chips.scroll{max-height:9.5rem;overflow:auto;align-content:flex-start;padding:.15rem .15rem .15rem 0;scrollbar-width:thin}
+.seg button:disabled{opacity:.45;cursor:default}
+.seg button:disabled:hover{background:none}
 
 /* Bulk bar */
 .adm-bulk{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.65rem .95rem;background:color-mix(in srgb,var(--acc) 14%,var(--panel));border-radius:14px;box-shadow:var(--shadow-sm)}
@@ -182,6 +189,8 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 
 /* User list */
 .adm-list{display:flex;flex-direction:column}
+.adm-results-top{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;padding:.85rem 1.1rem;border-bottom:1px solid var(--line)}
+.adm-results-top h2{font-size:.95rem;margin:0;font-weight:650}
 .adm-lhead,.adm-row,.adm-skel{display:grid;grid-template-columns:34px minmax(0,1fr) 118px 118px 108px;align-items:center;gap:.8rem;padding:.7rem 1.1rem}
 .adm-lhead{color:var(--mute);font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line)}
 .adm-row{transition:background .15s}
@@ -293,6 +302,18 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
   .adm-dialog{width:94vw}
   .adm-dialog.wide{width:94vw}
   .adm-search{min-width:100%}
+  .adm-fgrid{display:grid;grid-template-columns:1fr;gap:.5rem}
+  .adm-fgrid .adm-search{min-width:0}
+  .adm-fgrid .adm-sort{margin-left:0;width:100%;min-height:44px}
+  .adm-fgrid .seg{display:flex;width:100%}
+  .adm-fgrid .seg button{flex:1;padding:.5rem .3rem;font-size:.84rem;min-height:42px}
+  .adm-fcourses-top{gap:.5rem}
+  .adm-fcourses .seg{display:flex;width:100%}
+  .adm-fcourses .seg button{flex:1;padding:.5rem .3rem;font-size:.84rem;min-height:42px}
+  .adm-search.sm{flex:1 1 auto;min-width:0;width:100%}
+  .adm-search.sm input{font-size:16px}
+  .adm-chips.scroll{max-height:12rem;padding-bottom:.5rem;mask-image:linear-gradient(to bottom,#000 calc(100% - 26px),transparent);-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 26px),transparent)}
+  .adm-chips.scroll .chip{font-size:.82rem;padding:.34rem .7rem}
   .adm-close{width:44px;height:44px;padding:0;display:grid;place-items:center;font-size:1.15rem;border-radius:12px}
   .adm-sec-head .p{padding:.4rem .75rem;font-size:.82rem;min-height:38px}
   .adm-drawer-top{padding-top:calc(1rem + env(safe-area-inset-top))}
