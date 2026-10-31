@@ -72,7 +72,7 @@ Cloudflare Worker  (worker/index.js)
 ### Data model (D1)
 
 ```sql
-users   (id INTEGER PK, email TEXT UNIQUE, pass TEXT, is_admin INTEGER)   -- pass = "<b64 salt>.<b64 PBKDF2 hash>"
+users   (id INTEGER PK, email TEXT UNIQUE, pass TEXT, is_admin INTEGER, google_sub TEXT UNIQUE)   -- google_sub added by migrate() at startup; pass = "<b64 salt>.<b64 PBKDF2 hash>"
 watched (user_id INTEGER, lesson TEXT, PRIMARY KEY (user_id, lesson))      -- lesson = R2 object key
 ```
 
@@ -81,17 +81,20 @@ watched (user_id INTEGER, lesson TEXT, PRIMARY KEY (user_id, lesson))      -- le
 | Endpoint | Auth | Notes |
 | --- | --- | --- |
 | `POST /api/login`, `/api/logout` | none | Sets or clears the cookie |
+| `GET /api/config` | none | `{googleClientId}` |
+| `POST /api/login/google` | none | `{credential}`; verifies the Google ID token (RS256 against Google's JWKS, `iss`, `aud`, `exp`, `email_verified`), matches `google_sub` then invited email, links on first login |
 | `GET /api/me` | session | `{id, email, is_admin}` |
 | `GET /api/course` | session | `[{title, sections:[{title, lessons:[{id, title, kind:'video'|'pdf', done}]}]}]`; `section.title` is the sub-path joined by `" / "` or `null` |
 | `GET /api/media/<url-encoded key>` | session | Allow-listed extensions only; range requests; refuses `Sec-Fetch-Dest: document` |
 | `POST /api/progress` | session | `{lesson, done}` |
 | `GET /api/admin/users` | admin | Users with `watched` count and `owner` flag |
-| `POST /api/admin/users` | admin | `{email, password, is_admin?}`; validates email and 8+ char password |
+| `POST /api/admin/users` | admin | `{email, password, is_admin?, google_only?}`; `google_only` stores an unusable random password hash |
+| `POST /api/admin/users/bulk` | admin | Bulk add; Google-only rows store the marker `'!'` as `pass` (no hashing, `checkPw` rejects it); password rows are hashed one by one, so capped at 20 per request (the UI chunks) |
 | `POST /api/admin/users/<id>/password` | admin | Reset password |
 | `POST /api/admin/users/<id>/role` | admin | `{is_admin}`; blocked for the Owner and yourself |
 | `DELETE /api/admin/users/<id>` | admin | Deletes user and their `watched` rows; blocked for the Owner and yourself |
 
-Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
+Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Variable: `GOOGLE_CLIENT_ID` (public; enables Google sign-in).
 
 ### Course discovery (`listCourse`)
 
@@ -127,6 +130,7 @@ Verified in an earlier sandbox (original build):
 - `ng build` succeeded; the Worker ran under `wrangler dev`; curl checks of login, course listing, range responses, progress and static assets passed.
 
 Not verified (treat as unknown):
+- Google sign-in against the real Google service (button rendering, popup, token check); only the token verification logic was unit-tested.
 - `ng build` after the admin, course.ts, api.ts and styles changes (no network in the editing sandbox). Run `npm run build` first.
 - The admin endpoints, admin seeding and the new Back/optimistic-progress behavior end to end.
 - The PDF viewer layout after the CSS changes (`app-pdf-viewer` fills the lesson area; check the toolbar and page fit).
@@ -151,7 +155,7 @@ Not verified (treat as unknown):
 ## 6. Backlog (suggested order)
 
 1. Run `npm run build`, open the site, and fix whatever breaks (PDF layout, admin flows, mobile).
-2. Google login: see `docs/PLAN-google-login.md`.
+2. Google login is implemented; do the Google Cloud setup in `docs/PLAN-google-login.md` and test it end to end (the JWT verification was unit-tested with a locally generated key, not against real Google).
 3. Login rate limiting (Workers Rate Limiting binding or a Cloudflare rule).
 4. Student password change; optional "disable user" instead of delete.
 5. Resume playback position per lesson (store seconds in D1) and deep links.
