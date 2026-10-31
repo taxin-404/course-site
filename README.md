@@ -24,7 +24,9 @@ course-site/
       admin.ts           Admin panel: list/add/reset password/promote/delete users
   tools/make-hls.sh      Optional: converts videos to HLS and copies PDFs
   docs/HANDOFF.md        How it was built, what is verified, limits, backlog
-  docs/PLAN-google-login.md   Plan for the next feature (not built yet)
+  docs/PLAN-google-login.md   Google sign-in plan (implemented)
+  docs/SECURITY.md       Security model, download protection, gaps, next steps
+  public/_headers        Security headers for the static pages
 ```
 
 ## How the bucket maps to the site
@@ -105,7 +107,16 @@ Seed local R2 for testing:
 - Phones (≤760 px): the sidebar becomes a swipeable row of course cards, the lesson bar stacks with a full-width "Mark as complete", the video runs edge to edge, and the Admin panel stacks into one column.
 - Video uses the browser's native controls, including fullscreen.
 
-## Download protection (what it does and doesn't do)
+## Security and download protection
+
+See **`docs/SECURITY.md`** for the full list, known gaps and next steps. Summary:
+
+- Login throttling (15-minute lockout), signed sessions that are revoked on password reset, CSRF and security headers, a report-only CSP.
+- Media is browser-only (`Sec-Fetch-*` check blocks curl/yt-dlp/download managers), same-origin only, and capped at 20 distinct lessons per student per hour.
+- Video downloads are slowed: range-only, 4 MB chunks, per-student speed cap (`MAX_MBPS`). Browser extensions like FetchV can still save a video, only slowly; only DRM stops them.
+- Printing the page gives a blank sheet.
+
+### Details (older notes)
 
 - Every playlist, segment, video and PDF needs a logged-in session cookie. Opening a media URL directly in the address bar is refused (`Sec-Fetch-Dest: document`).
 - The player disables native download, remote playback, Picture-in-Picture and right-click. The student's email floats over the video as a watermark.

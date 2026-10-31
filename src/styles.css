@@ -208,3 +208,6 @@ app-pdf-viewer #viewerContainer,app-pdf-viewer .zoom{background:var(--bg)}
 .admin .file{position:relative;cursor:pointer;color:var(--acc);font-weight:500}
 .admin .file input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
 @media(max-width:700px){.admin .bf .p{margin-left:0;width:100%}}
+
+/* Printing the page (or saving it as PDF) produces a blank sheet */
+@media print{html,body{display:none!important}}

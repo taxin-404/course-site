@@ -11,3 +11,8 @@ ADMIN_PASSWORD=replace-with-a-strong-password
 # Optional: enables "Continue with Google" (public OAuth Web client ID, not a secret).
 # See docs/PLAN-google-login.md
 # GOOGLE_CLIENT_ID=1234567890-xxxx.apps.googleusercontent.com
+
+# Optional security tuning (see docs/SECURITY.md)
+# MAX_LESSONS_PER_HOUR=20        # distinct lessons a student can open per hour (admins exempt)
+# MAX_MBPS=12                    # per-student media speed cap (Mbit/s); higher = fewer buffering risks, faster downloads
+# RELAX_FETCH_METADATA=1         # only if an old browser cannot play media (turns off the Sec-Fetch check)

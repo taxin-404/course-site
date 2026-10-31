@@ -28,16 +28,19 @@ async function getUser(req, env) {
   if (!sig || !safeEq(sig, await hmac(env.SESSION_SECRET, p))) return null;
   const d = JSON.parse(new TextDecoder().decode(unb64(p)));
   if (d.exp < Date.now()) return null;
-  return env.DB.prepare('SELECT id, email, is_admin FROM users WHERE id = ?').bind(d.uid).first();
+  const u = await env.DB.prepare('SELECT id, email, is_admin, ver FROM users WHERE id = ?').bind(d.uid).first();
+  // 'ver' changes on password reset / role change, which signs the user out everywhere
+  return u && (d.v || 0) === u.ver ? u : null;
 }
-async function sessionCookie(uid, env) {
-  const p = b64(enc.encode(JSON.stringify({ uid, exp: Date.now() + 7 * 864e5 })));
+async function sessionCookie(u, env) {
+  const p = b64(enc.encode(JSON.stringify({ uid: u.id, v: u.ver || 0, exp: Date.now() + 7 * 864e5 })));
   return `s=${p}.${await hmac(env.SESSION_SECRET, p)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800`;
 }
 
 const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0)',
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
+  'CREATE TABLE IF NOT EXISTS attempts (k TEXT PRIMARY KEY, n INTEGER NOT NULL, t INTEGER NOT NULL)',
 ];
 let ready;
 // The first admin comes from Cloudflare secrets ADMIN_EMAIL + ADMIN_PASSWORD.
@@ -52,6 +55,8 @@ async function seedAdmin(env) {
 async function migrate(env) {
   const has = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'google_sub'").first();
   if (!has.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN google_sub TEXT').run();
+  const hasVer = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'ver'").first();
+  if (!hasVer.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
   await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)').run();
 }
 const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => migrate(env)).then(() => seedAdmin(env)).catch((e) => { ready = null; throw e; }));
@@ -135,10 +140,85 @@ async function listCourse(env) {
   return data;
 }
 
-async function serve(req, env, key) {
+// ---- Login throttling (stored in D1, so it works across all Worker instances) ----
+const LOCK_MS = 15 * 60e3;
+const ipOf = (req) => req.headers.get('cf-connecting-ip') || 'unknown';
+async function locked(env, keys) {
+  for (const [k, max] of keys) {
+    const r = await env.DB.prepare('SELECT n, t FROM attempts WHERE k = ?').bind(k).first();
+    if (r && Date.now() - r.t < LOCK_MS && r.n >= max) return true;
+  }
+  return false;
+}
+async function noteFail(env, keys) {
+  const now = Date.now();
+  await env.DB.batch([
+    ...keys.map(([k]) => env.DB.prepare('INSERT INTO attempts (k, n, t) VALUES (?, 1, ?) ON CONFLICT(k) DO UPDATE SET n = CASE WHEN ? - t > ? THEN 1 ELSE n + 1 END, t = CASE WHEN ? - t > ? THEN ? ELSE t END').bind(k, now, now, LOCK_MS, now, LOCK_MS, now)),
+    env.DB.prepare('DELETE FROM attempts WHERE t < ?').bind(now - LOCK_MS * 4),
+  ]);
+}
+const tooMany = () => json({ error: 'Too many attempts. Try again in 15 minutes.' }, 429);
+
+// ---- Media protection ----
+// 1) Browsers tell us who is asking via Sec-Fetch-* headers. Downloaders (curl, wget, yt-dlp, most download
+//    managers) do not send them, and other websites cannot make a browser send "same-origin".
+function mediaRequestOk(req, env) {
+  const site = req.headers.get('sec-fetch-site');
+  const dest = req.headers.get('sec-fetch-dest');
+  if (['document', 'iframe', 'frame', 'embed', 'object'].includes(dest) || req.headers.get('sec-fetch-mode') === 'navigate') return false;
+  if (env.RELAX_FETCH_METADATA) return true; // escape hatch for old browsers
+  return site === 'same-origin' && ['video', 'audio', 'empty', 'track'].includes(dest);
+}
+// 2) Scraping a whole course touches many lessons quickly. Cap distinct lessons per user per hour (per Worker instance).
+const seen = new Map();
+const lessonOf = (key) => (/\.(m3u8|ts)$/i.test(key) ? key.slice(0, key.lastIndexOf('/')) : key);
+function scraping(env, u, key) {
+  if (u.is_admin) return false;
+  const now = Date.now();
+  let e = seen.get(u.id);
+  if (!e || now - e.t > 36e5) { if (seen.size > 2000) seen.clear(); e = { t: now, s: new Set() }; seen.set(u.id, e); }
+  e.s.add(lessonOf(key));
+  return e.s.size > Number(env.MAX_LESSONS_PER_HOUR || 20);
+}
+
+// 3) Slow-down: video must be requested in ranges (browsers always do; a plain "download this URL" gets refused),
+//    each answer is at most CHUNK bytes, and each student's total media speed is capped near normal playback
+//    speed. Fast requests are delayed instead of rejected, so playback stays smooth but bulk downloading is slow.
+const CHUNK = 4 * 1024 * 1024;
+const VIDEO_FILE = /\.(mp4|webm|mkv|mov|avi|m4v)$/i;
+const buckets = new Map();
+function reserve(env, u, bytes) {
+  if (u.is_admin) return 0;
+  const rate = Number(env.MAX_MBPS || 12) * 125000; // bytes per second
+  const burst = rate * 20; // lets the player fill its buffer and seek
+  const now = Date.now();
+  let b = buckets.get(u.id);
+  if (!b) { if (buckets.size > 2000) buckets.clear(); b = { tokens: burst, t: now }; buckets.set(u.id, b); }
+  b.tokens = Math.min(burst, b.tokens + ((now - b.t) / 1000) * rate);
+  b.t = now;
+  b.tokens -= bytes;
+  if (b.tokens >= 0) return 0;
+  const wait = (-b.tokens / rate) * 1000;
+  if (wait > 25000) { b.tokens += bytes; return null; }
+  return wait;
+}
+
+async function serve(req, env, key, u) {
   const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v)$/i.test(key);
-  if (!ok || req.headers.get('sec-fetch-dest') === 'document') return json({ error: 'Not allowed' }, 403);
-  const obj = await env.VIDEOS.get(key, { range: req.headers });
+  if (!ok || !mediaRequestOk(req, env)) return json({ error: 'Not allowed' }, 403);
+  if (scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
+  const isVideo = VIDEO_FILE.test(key);
+  let range = req.headers;
+  if (isVideo) {
+    const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.get('range') || '');
+    if (!req.headers.has('range')) return json({ error: 'Not allowed' }, 403);
+    if (m) {
+      const start = Number(m[1]);
+      const end = m[2] === '' ? Infinity : Number(m[2]);
+      range = { offset: start, length: Math.min(end - start + 1, CHUNK) };
+    }
+  }
+  const obj = await env.VIDEOS.get(key, { range });
   if (!obj) return json({ error: 'File not found' }, 404);
   const h = new Headers();
   h.set('content-type', MEDIA_TYPES[key.split('.').pop().toLowerCase()] || 'application/octet-stream');
@@ -146,6 +226,8 @@ async function serve(req, env, key) {
   h.set('cache-control', /\.pdf$/i.test(key) ? 'private, max-age=3600' : 'private, no-store');
   h.set('x-content-type-options', 'nosniff');
   h.set('content-disposition', 'inline');
+  h.set('cross-origin-resource-policy', 'same-origin');
+  h.set('x-robots-tag', 'noindex');
   let status = 200;
   if (obj.range && req.headers.has('range')) {
     const { offset = 0, length = obj.size - offset } = obj.range;
@@ -153,11 +235,43 @@ async function serve(req, env, key) {
     h.set('content-length', String(length));
     status = 206;
   } else h.set('content-length', String(obj.size));
+  if (!/\.pdf$/i.test(key)) {
+    const wait = reserve(env, u, Number(h.get('content-length')) || 0);
+    if (wait === null) return json({ error: 'Too fast. Please slow down.' }, 429, { 'retry-after': '30' });
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  }
   return new Response(obj.body, { status, headers: h });
 }
 
+const SEC_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'strict-transport-security': 'max-age=31536000',
+  'cross-origin-resource-policy': 'same-origin',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+};
+
 export default {
   async fetch(req, env) {
+    const url = new URL(req.url);
+    // CSRF defense in depth: state-changing API calls must come from this site
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+      const origin = req.headers.get('origin');
+      const site = req.headers.get('sec-fetch-site');
+      if ((origin && new URL(origin).host !== url.host) || (!origin && site && site !== 'same-origin' && site !== 'none')) {
+        return json({ error: 'Forbidden' }, 403);
+      }
+    }
+    const res = await handle(req, env);
+    for (const [k, v] of Object.entries(SEC_HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v);
+    if (!res.headers.has('cache-control')) res.headers.set('cache-control', 'no-store');
+    return res;
+  },
+};
+
+const handle = async (req, env) => {
+  {
     const { pathname: path } = new URL(req.url);
     const m = req.method;
     try {
@@ -165,30 +279,35 @@ export default {
       if (path === '/api/config') return json({ googleClientId: env.GOOGLE_CLIENT_ID || '' });
       if (path === '/api/login/google' && m === 'POST') {
         if (!env.GOOGLE_CLIENT_ID) return json({ error: 'Google sign-in is not set up' }, 503);
+        const ip = ['i:' + ipOf(req), 40];
+        if (await locked(env, [ip])) return tooMany();
         const { credential } = await req.json();
         const c = await verifyGoogle(String(credential || ''), env).catch(() => null);
-        if (!c) return json({ error: 'Google sign-in failed' }, 401);
-        let u = await env.DB.prepare('SELECT id, email, google_sub FROM users WHERE google_sub = ?').bind(c.sub).first();
+        if (!c) { await noteFail(env, [ip]); return json({ error: 'Google sign-in failed' }, 401); }
+        let u = await env.DB.prepare('SELECT id, email, google_sub, ver FROM users WHERE google_sub = ?').bind(c.sub).first();
         if (!u) {
-          u = await env.DB.prepare('SELECT id, email, google_sub FROM users WHERE email = ?').bind(c.email.toLowerCase()).first();
+          u = await env.DB.prepare('SELECT id, email, google_sub, ver FROM users WHERE email = ?').bind(c.email.toLowerCase()).first();
           if (!u) return json({ error: 'This Google account has not been invited' }, 403);
           if (u.google_sub && u.google_sub !== c.sub) return json({ error: 'This email is linked to a different Google account' }, 403);
           await env.DB.prepare('UPDATE users SET google_sub = ? WHERE id = ?').bind(c.sub, u.id).run();
         }
-        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u.id, env) });
+        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u, env) });
       }
       if (path === '/api/login' && m === 'POST') {
         const { email, password } = await req.json();
-        const u = await env.DB.prepare('SELECT id, pass FROM users WHERE email = ?').bind(String(email).toLowerCase()).first();
-        if (!u || !(await checkPw(String(password), u.pass))) return json({ error: 'Wrong email or password' }, 401);
-        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u.id, env) });
+        const em = String(email || '').trim().toLowerCase();
+        const keys = [['ei:' + em + '|' + ipOf(req), 8], ['i:' + ipOf(req), 40]];
+        if (await locked(env, keys)) return tooMany();
+        const u = await env.DB.prepare('SELECT id, pass, ver FROM users WHERE email = ?').bind(em).first();
+        if (!u || !(await checkPw(String(password || ''), u.pass))) { await noteFail(env, keys); return json({ error: 'Wrong email or password' }, 401); }
+        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u, env) });
       }
       if (path === '/api/logout' && m === 'POST') return json({ ok: true }, 200, { 'set-cookie': 's=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0' });
 
       const u = await getUser(req, env);
       if (!u) return json({ error: 'Not logged in' }, 401);
 
-      if (path === '/api/me') return json(u);
+      if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin });
       if (path === '/api/course') {
         const w = new Set((await env.DB.prepare('SELECT lesson FROM watched WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.lesson));
         return json((await listCourse(env)).map((c) => ({
@@ -199,7 +318,7 @@ export default {
           })),
         })));
       }
-      if (path.startsWith('/api/media/')) return serve(req, env, decodeURIComponent(path.slice(11)));
+      if (path.startsWith('/api/media/')) return serve(req, env, decodeURIComponent(path.slice(11)), u);
       if (path === '/api/progress' && m === 'POST') {
         const { lesson, done } = await req.json();
         await env.DB.prepare(done ? 'INSERT OR IGNORE INTO watched (user_id, lesson) VALUES (?, ?)' : 'DELETE FROM watched WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
@@ -258,13 +377,13 @@ export default {
           if (mm[2] === 'password' && m === 'POST') {
             const b = await req.json();
             if (!validPw(b.password)) return json({ error: 'Password must be 8+ characters' }, 400);
-            await env.DB.prepare('UPDATE users SET pass = ? WHERE id = ?').bind(await hashPw(b.password), id).run();
+            await env.DB.prepare('UPDATE users SET pass = ?, ver = ver + 1 WHERE id = ?').bind(await hashPw(b.password), id).run();
             return json({ ok: true });
           }
           if (mm[2] === 'role' && m === 'POST') {
             const b = await req.json();
             if (isOwner(env, t.email) || t.id === u.id) return json({ error: 'You cannot change this admin' }, 400);
-            await env.DB.prepare('UPDATE users SET is_admin = ? WHERE id = ?').bind(b.is_admin ? 1 : 0, id).run();
+            await env.DB.prepare('UPDATE users SET is_admin = ?, ver = ver + 1 WHERE id = ?').bind(b.is_admin ? 1 : 0, id).run();
             return json({ ok: true });
           }
           if (!mm[2] && m === 'DELETE') {
@@ -282,5 +401,5 @@ export default {
       const dup = String(e).includes('UNIQUE');
       return json({ error: dup ? 'That email already exists' : 'Server error' }, dup ? 409 : 500);
     }
-  },
+  }
 };

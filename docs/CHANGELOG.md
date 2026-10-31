@@ -11,6 +11,15 @@
 - Bulk user import in the Admin panel (paste or file; Google-only or generated passwords with CSV download) and `POST /api/admin/users/bulk`.
 - `docs/PLAN-google-login.md`.
 
+### Security
+- Login lockout (8 failures per email+IP, 40 per IP, 15 min) stored in D1.
+- Session versioning: password reset or role change signs the user out everywhere.
+- CSRF origin check, security headers on API and pages, report-only CSP (`public/_headers`).
+- Media gate: requires browser `Sec-Fetch-*` headers (blocks curl/yt-dlp/download managers and hotlinking); cap of 20 distinct lessons per student per hour; `Cross-Origin-Resource-Policy`.
+- Slow-down for bulk downloading: video needs Range requests, 4 MB answers, per-student speed cap (`MAX_MBPS`, default 12 Mbit/s).
+- Page printing disabled; `/api/me` no longer returns internal fields.
+- New `docs/SECURITY.md`.
+
 ### Changed
 - Full UI redesign (tokens, light/dark, cards, gradients) and a dedicated phone layout.
 - "Mark as complete" updates instantly (optimistic), shows "✓ Completed", and Back returns to the same folder.

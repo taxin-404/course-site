@@ -137,12 +137,16 @@ Not verified (treat as unknown):
 - Real HLS playback, Safari, and Workers Free CPU limits (PBKDF2 100k iterations may exceed 10 ms on login).
 - Large libraries (hundreds of lessons) and 30-60 GB of real media.
 
+## 4b. Security hardening (added later)
+
+See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 per email+IP, 40 per IP, 15 min), `users.ver` session version (bumped on password reset and role change; cookie carries `v`), Origin/Sec-Fetch CSRF check, security headers on API responses, media gate (`mediaRequestOk`: needs `Sec-Fetch-Site: same-origin` and media dest) and per-user distinct-lesson cap (`scraping`, in-memory per instance, admins exempt). `public/_headers` adds headers and a report-only CSP for the static pages. Also `serve()` requires a `Range` header for video files, truncates each answer to 4 MB (`CHUNK`) and delays requests above `MAX_MBPS` per student (`reserve()`, in-memory leaky bucket; 429 if the delay would exceed 25 s). Not verified against a real browser/deploy (including whether FetchV is actually slowed): the CSP (report-only, check the console), and iOS/Safari native HLS with the Sec-Fetch gate (`RELAX_FETCH_METADATA=1` is the escape hatch).
+
 ## 5. Known limitations and risks
 
 1. A signed-in technical student can still capture or fetch media with their cookie (`yt-dlp`, or the file URL for plain MP4/PDF). No DRM.
 2. The video watermark is a DOM element, removable with DevTools, and absent in native fullscreen. PDFs have no watermark.
 3. HLS segments are not encrypted; protection is the session cookie only.
-4. No login rate limiting or lockout.
+4. Login lockout exists, but there is no Cloudflare WAF/bot protection configured; see `docs/SECURITY.md`.
 5. No password change by the student, no self-service reset, no "disable" (only delete).
 6. Progress is keyed by R2 object key, so renaming loses it.
 7. `listCourse` lists the whole bucket per cold isolate/cache expiry.
@@ -156,7 +160,7 @@ Not verified (treat as unknown):
 
 1. Run `npm run build`, open the site, and fix whatever breaks (PDF layout, admin flows, mobile).
 2. Google login is implemented; do the Google Cloud setup in `docs/PLAN-google-login.md` and test it end to end (the JWT verification was unit-tested with a locally generated key, not against real Google).
-3. Login rate limiting (Workers Rate Limiting binding or a Cloudflare rule).
+3. Enforce the CSP, turn on Cloudflare Bot Fight Mode and WAF rate limits, move to HLS-only (`docs/SECURITY.md`).
 4. Student password change; optional "disable user" instead of delete.
 5. Resume playback position per lesson (store seconds in D1) and deep links.
 6. Watermark support in fullscreen (custom fullscreen on the wrapper) and on PDFs, if leak tracing matters.
