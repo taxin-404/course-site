@@ -125,9 +125,6 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 
 .adm-top{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap}
 .adm-top-actions{display:flex;gap:.5rem;align-items:center}
-.adm-ico{width:40px;height:40px;display:grid;place-items:center;padding:0!important;font-size:1.05rem}
-.spin{display:inline-block;animation:adm-spin .9s linear infinite}
-@keyframes adm-spin{to{transform:rotate(360deg)}}
 
 /* Stat cards */
 .adm-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:.7rem}
@@ -287,7 +284,6 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
   .stat span{font-size:.7rem;line-height:1.25}
   .adm-top h1{font-size:1.7rem}
   .adm-sub{font-size:.82rem}
-  .adm-ico{width:46px;height:46px}
   .adm-drawer{width:100vw;border-left:0;padding-bottom:env(safe-area-inset-bottom)}
   .adm-dialog{width:94vw}
   .adm-dialog.wide{width:94vw}

@@ -27,9 +27,6 @@ const ROLES: { key: RoleFilter; label: string }[] = [
           </p>
         </div>
         <div class="adm-top-actions">
-          <button type="button" class="adm-ico" title="Refresh" aria-label="Refresh list" [disabled]="loading()" (click)="refresh()">
-            <span [class.spin]="loading()">⟳</span>
-          </button>
           <button type="button" class="p" (click)="openAdd()">+ Add users</button>
         </div>
       </div>
