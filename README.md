@@ -2,7 +2,7 @@
 
 A private video and PDF course site on Cloudflare. Students sign in and watch lessons; the course layout is read straight from your R2 bucket's folders. Admins manage users from an in-app Admin panel.
 
-**Stack:** Angular 21 (standalone components, signals), Cloudflare Worker API, R2 (videos, PDFs), D1 (users, progress). `hls.js` and `ngx-extended-pdf-viewer` load only when a lesson needs them.
+**Stack:** Angular 21 (standalone components, signals), Cloudflare Worker API, R2 (videos, PDFs), D1 (users, progress, course access, private PDF notes). `hls.js` and `ngx-extended-pdf-viewer` load only when a lesson needs them.
 
 ## Project structure
 
@@ -18,10 +18,10 @@ course-site/
       api.ts             API client and app state (signals)
       app.ts             Shell: header (logo, Admin panel toggle, Sign out)
       login.ts           Sign-in form + Google button
-      course.ts          Course sidebar, folder browser, lesson view, Mark as complete
+      course.ts          Course cards (home), outline sidebar (folder tree + search), folder browser, lesson view, Mark as complete
       player.ts          Video player with moving email watermark
-      pdf-viewer.ts      PDF reader (ngx-extended-pdf-viewer, toolbar trimmed)
-      admin.ts           Admin panel: list/add/reset password/promote/delete users
+      pdf-viewer.ts      PDF reader with private notes, hide/reset and full-window mode (download and print stay off)
+      admin.ts           Admin panel: list/add/reset password/promote/delete users, give courses
   tools/make-hls.sh      Optional: converts videos to HLS and copies PDFs
   docs/HANDOFF.md        How it was built, what is verified, limits, backlog
   docs/PLAN-google-login.md   Google sign-in plan (implemented)
@@ -39,7 +39,7 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 <Course>/<Folder>/<Sub>/<file>      nested folders
 ```
 
-- Top-level folder = **course** (shown in the sidebar).
+- Top-level folder = **course** (shown as a card on the home screen; inside a course the sidebar is its folder outline).
 - Sub-folders = folders in the file browser (breadcrumb: `./Courses / Course / Folder /`).
 - Files = **lessons**. Video: `.mp4 .webm .mkv .mov .avi .m4v .m3u8`. Documents: `.pdf`. HLS segments (`.ts`) are hidden from the list.
 - For an HLS lesson, the title is its parent folder name (`<Lesson>/index.m3u8`).
@@ -54,6 +54,23 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - There is no self-signup. Users must be added by an admin first.
 - **Google sign-in (optional, invite-only):** set the variable `GOOGLE_CLIENT_ID` and the login page shows "Continue with Google". It only works for emails an admin already added; the first Google login links that account to the Google user ID. Admins can add a user as **Google only** (no password).
 - **Many users at once:** in the Admin panel, *Add many users* takes a pasted list or a `.csv`/`.txt` file of emails. *Google sign-in only* (default) adds hundreds instantly with no passwords; otherwise each user gets a generated password, shown once with Copy and Download CSV. Existing and invalid emails are skipped and reported. Setup steps: `docs/PLAN-google-login.md` section 1.
+
+## Courses and access
+
+- A student sees only the courses an admin gave them; admins see all. The Worker checks the course (the first folder of the key) on `/api/course`, `/api/media/*` and `/api/notes/*`, so a copied file address for another course returns `403`.
+- Admin panel: tick **Courses for new users** before adding one or many users, or use the **Courses** button on a student's row to change it later.
+- On the first request after this feature is deployed, every existing student is given every current course, so nobody loses access. After that, access is exactly what the admin sets.
+- Payment is manual for now: the student pays you (for example bKash or Nagad), then you give the course in the Admin panel.
+- Access is tied to the **folder name**. Renaming a course folder in R2 removes access to it (and resets progress).
+- Home screen: course cards with progress (a student with one course goes straight in). Inside a course the sidebar shows the folder tree: folders open and close at any depth, show done/total, expand to the open lesson, remember what was open, and a search box filters lessons.
+
+## PDF notes
+
+- In the PDF viewer students can highlight, write text, draw, add stamps/images, erase and undo. Notes are **private to each student**, saved automatically to their account (D1 table `pdf_notes`, one row per student and PDF) and reloaded on any device.
+- **Hide my notes** shows the clean original and keeps the notes; **Reset to original** deletes them after a confirmation. The PDF in R2 is never changed.
+- **Full window** fills the browser window (not the whole screen) with the toolbar inside; `Esc` exits.
+- Limit: about 1.5 MB of notes per PDF (large stamp images can hit it).
+- **Download stays off, always:** download/save buttons are removed, `supportsDownloading` is `false`, `Ctrl/Cmd+S` and `Ctrl/Cmd+P` are blocked, and print and open-file are off. Do not enable them.
 
 ## Prepare and upload content
 
@@ -104,7 +121,8 @@ Seed local R2 for testing:
 
 - Light and dark follow the system setting. Colors, radii and shadows are tokens at the top of `src/styles.css`.
 - The logo uses *Curse of the Zombie*, which only has capital letters, so the CSS uppercases it.
-- Phones (≤760 px): the sidebar becomes a swipeable row of course cards, the lesson bar stacks with a full-width "Mark as complete", the video runs edge to edge, and the Admin panel stacks into one column.
+- Colors follow a four-color palette (`#202734`, `#36415A`, `#B7D894`, `#E0F8C7`) in dark mode; light mode is derived from it.
+- Phones (≤760 px): the course outline is a scrollable box (up to 38% of the screen) above the lesson, the lesson bar stacks with a full-width "Mark as complete", the video runs edge to edge, and the Admin panel stacks into one column.
 - Video uses the browser's native controls, including fullscreen.
 
 ## Security and download protection
@@ -127,6 +145,8 @@ See **`docs/SECURITY.md`** for the full list, known gaps and next steps. Summary
 
 ## Costs
 
+R2 includes 10 GB-month free; beyond that it is $0.015/GB-month (about $0.30 per month for 30 GB). Downloads are free. **If a payment fails, R2 can be suspended** (the site then cannot serve videos or PDFs) and data may be deleted after 30 days without a valid payment method; keep a second card, a budget alert and your own backup of the originals.
+
 About $0.015/GB-month on R2 with free egress (60 GB is roughly $0.75-$1/month). Workers and D1 free tiers cover a small cohort.
 
 ## API
@@ -140,9 +160,12 @@ About $0.015/GB-month on R2 with free egress (60 GB is roughly $0.75-$1/month). 
 | `GET /api/course` | signed in | `[{title, sections:[{title, lessons:[{id,title,kind,done}]}]}]` from the bucket |
 | `GET /api/media/<key>` | signed in | Playlist, segment, video or PDF (range requests supported) |
 | `POST /api/progress` | signed in | `{lesson, done}` |
+| `GET/PUT/DELETE /api/notes/<url-encoded pdf key>` | signed in | The student's own notes for one PDF (`PUT {data: []}`); `403` for a course they do not have |
+| `GET /api/admin/courses` | admin | Course names found in the bucket |
+| `POST /api/admin/users/<id>/courses` | admin | `{courses: []}` replaces the student's courses |
 | `GET /api/admin/users` | admin | List users with role and lessons done |
-| `POST /api/admin/users` | admin | Add a user `{email, password, is_admin?, google_only?}` |
-| `POST /api/admin/users/bulk` | admin | `{emails[], google_only?, is_admin?}`; up to 500 emails Google-only, or 20 with generated passwords per request; returns `{added, skipped}` |
+| `POST /api/admin/users` | admin | Add a user `{email, password, is_admin?, google_only?, courses?}` |
+| `POST /api/admin/users/bulk` | admin | `{emails[], google_only?, is_admin?, courses?}`; up to 500 emails Google-only, or 20 with generated passwords per request; returns `{added, skipped}` |
 | `POST /api/admin/users/<id>/password` | admin | Reset password `{password}` |
 | `POST /api/admin/users/<id>/role` | admin | `{is_admin}`; not for the Owner or yourself |
 | `DELETE /api/admin/users/<id>` | admin | Delete user and progress; not the Owner or yourself |
