@@ -58,10 +58,10 @@ Cloudflare Worker  (worker/index.js)
 | `src/app/api.ts` | `Api` service: fetch wrapper (GET/POST/DELETE) and app state signals (`me`, `courses`); user-admin calls |
 | `src/app/app.ts` | Root: header (logo, Admin panel toggle, Sign out), switches course/admin views |
 | `src/app/login.ts` | Sign-in form |
-| `src/app/course.ts` | Sidebar, folder browser with breadcrumb, lesson view, Mark as complete |
+| `src/app/course.ts` | Course cards (home), sidebar folder tree with search, folder browser with breadcrumb, lesson view, Mark as complete |
 | `src/app/player.ts` | Video element + moving email watermark (native controls) |
-| `src/app/pdf-viewer.ts` | PDF reader configuration |
-| `src/app/admin.ts` | Admin panel UI |
+| `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), full-window mode, download/print locked off |
+| `src/app/admin.ts` | Admin panel UI, including course checkboxes |
 | `src/styles.css` | All styling and the bundled logo font |
 | `src/curse-of-the-zombie.ttf` | Logo font (capitals only; CSS uppercases the logo) |
 | `angular.json` | Copies `public/` and the pdf viewer's `assets/` into the build |
@@ -74,6 +74,8 @@ Cloudflare Worker  (worker/index.js)
 ```sql
 users   (id INTEGER PK, email TEXT UNIQUE, pass TEXT, is_admin INTEGER, google_sub TEXT UNIQUE)   -- google_sub added by migrate() at startup; pass = "<b64 salt>.<b64 PBKDF2 hash>"
 watched (user_id INTEGER, lesson TEXT, PRIMARY KEY (user_id, lesson))      -- lesson = R2 object key
+pdf_notes (user_id INTEGER, lesson TEXT, data TEXT, updated INTEGER, PRIMARY KEY (user_id, lesson))   -- data = JSON array of serialized editor annotations (max 1.5 MB)
+enrollments (user_id INTEGER, course TEXT, PRIMARY KEY (user_id, course))   -- course = first R2 folder name; created in migrate(), which grants all current courses to existing users once
 ```
 
 ### API
@@ -87,6 +89,9 @@ watched (user_id INTEGER, lesson TEXT, PRIMARY KEY (user_id, lesson))      -- le
 | `GET /api/course` | session | `[{title, sections:[{title, lessons:[{id, title, kind:'video'|'pdf', done}]}]}]`; `section.title` is the sub-path joined by `" / "` or `null` |
 | `GET /api/media/<url-encoded key>` | session | Allow-listed extensions only; range requests; refuses `Sec-Fetch-Dest: document` |
 | `POST /api/progress` | session | `{lesson, done}` |
+| `GET/PUT/DELETE /api/notes/<url-encoded key>` | session | Own notes for one `.pdf`; every query is scoped to the signed-in user; `403` if the course is not enrolled |
+| `GET /api/admin/courses` | admin | Course names from `listCourse` |
+| `POST /api/admin/users/<id>/courses` | admin | `{courses: []}`; replaces the user's enrollments |
 | `GET /api/admin/users` | admin | Users with `watched` count and `owner` flag |
 | `POST /api/admin/users` | admin | `{email, password, is_admin?, google_only?}`; `google_only` stores an unusable random password hash |
 | `POST /api/admin/users/bulk` | admin | Bulk add; Google-only rows store the marker `'!'` as `pass` (no hashing, `checkPw` rejects it); password rows are hashed one by one, so capped at 20 per request (the UI chunks) |
@@ -104,7 +109,7 @@ Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSW
 4. `.m3u8` lessons are titled by their parent folder; others by file name without extension.
 5. Sort with a numeric-aware collator.
 
-The Angular browser (`course.ts`) rebuilds the folder tree from `section.title` and shows only the current level.
+`/api/course` and `/api/media/*` then filter by `enrollments` (`myCourses`; admins get everything). The Angular browser (`course.ts`) rebuilds the folder tree from `section.title` for both the main browser (current level) and the sidebar outline (`rows` computed: open folders only, flat list while searching).
 
 ### Auth
 
@@ -137,6 +142,14 @@ Not verified (treat as unknown):
 - Real HLS playback, Safari, and Workers Free CPU limits (PBKDF2 100k iterations may exceed 10 ms on login).
 - Large libraries (hundreds of lessons) and 30-60 GB of real media.
 
+## 4a. Added after the first handoff
+
+- **Private PDF notes** (`pdf-viewer.ts`, `/api/notes`): uses `getSerializedAnnotations` / `addEditorAnnotation` / `removeEditorAnnotations` from `ngx-extended-pdf-viewer`; text, draw, highlight and stamp are enabled, comment and signature are off (their save/restore was not confirmed). Download is locked off by `supportsDownloading=false`, hidden buttons and a capture-phase block of Ctrl/Cmd+S and +P.
+- **Multi-course access** (`enrollments`, Admin course checkboxes, Worker checks on course, media and notes) with manual payment.
+- **Home cards and sidebar tree** in `course.ts`; single-course students skip the home screen.
+- **Palette** in `styles.css` tokens (dark = the four-color palette, light derived).
+- Not verified (no build or browser run): all of the above. Run `npm run build` and test: notes survive a reload, Hide/Reset, `Ctrl+S` does nothing, a student without a course gets `403` on its media, the admin Courses button, and the phone layout of the outline.
+
 ## 4b. Security hardening (added later)
 
 See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 per email+IP, 40 per IP, 15 min), `users.ver` session version (bumped on password reset and role change; cookie carries `v`), Origin/Sec-Fetch CSRF check, security headers on API responses, media gate (`mediaRequestOk`: needs `Sec-Fetch-Site: same-origin` and media dest) and per-user distinct-lesson cap (`scraping`, in-memory per instance, admins exempt). `public/_headers` adds headers and a report-only CSP for the static pages. Also `serve()` requires a `Range` header for video files, truncates each answer to 4 MB (`CHUNK`) and delays requests above `MAX_MBPS` per student (`reserve()`, in-memory leaky bucket; 429 if the delay would exceed 25 s). Not verified against a real browser/deploy (including whether FetchV is actually slowed): the CSP (report-only, check the console), and iOS/Safari native HLS with the Sec-Fetch gate (`RELAX_FETCH_METADATA=1` is the escape hatch).
@@ -148,7 +161,8 @@ See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 
 3. HLS segments are not encrypted; protection is the session cookie only.
 4. Login lockout exists, but there is no Cloudflare WAF/bot protection configured; see `docs/SECURITY.md`.
 5. No password change by the student, no self-service reset, no "disable" (only delete).
-6. Progress is keyed by R2 object key, so renaming loses it.
+6. Progress, notes and course access are keyed by R2 object/folder names, so renaming loses them (a fixed course ID in D1 would fix access).
+6a. No access expiry dates; payment is manual (no gateway).
 7. `listCourse` lists the whole bucket per cold isolate/cache expiry.
 8. The schema helper only creates missing tables; altering a table needs a manual `wrangler d1 execute` or a try/catch `ALTER` step.
 9. The Worker is plain JavaScript with no tests; the frontend has no tests.
@@ -157,6 +171,8 @@ See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 
 12. `@angular/router` is listed in `package.json` but not used.
 
 ## 6. Backlog (suggested order)
+
+0. Fixed course IDs (rename-safe), access expiry dates, a phone menu button for the outline, and (later) automatic payment through a Bangladeshi gateway (SSLCommerz, bKash API).
 
 1. Run `npm run build`, open the site, and fix whatever breaks (PDF layout, admin flows, mobile).
 2. Google login is implemented; do the Google Cloud setup in `docs/PLAN-google-login.md` and test it end to end (the JWT verification was unit-tested with a locally generated key, not against real Google).
