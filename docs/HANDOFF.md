@@ -1,36 +1,40 @@
-# Handoff: how this project was built
+# Handoff: how this project was built and where it stands
 
-This document is written for a developer or AI assistant who will review and optimize the project. It records the requirements, the decisions and why they were made, what was actually verified, and where the weak points are. Read it fully before changing anything.
+For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the admin panel, UI redesign and mobile pass.
 
 ## 1. Goal and requirements
 
-A private video course site for a small cohort (about 6 students, expected to grow to a few hundred at most).
+A private video course site for a small cohort (about 6 students, growing to a few hundred at most).
 
 - About 30 GB of video now, planned 60 GB, plus PDFs.
-- Videos must be stream-only. The owner wanted "no one can download it", which was explained to be impossible in absolute terms. The agreed target is to make downloading hard and leaks traceable.
-- The site must show lessons organized exactly like the folders in the storage bucket.
-- Cost must stay very low. The owner already has a Cloudflare account with R2 enabled (billing attached).
-- Deploys must happen automatically when the Git repo is connected to the Cloudflare dashboard (Workers Builds).
-- Frontend must be Angular.
+- Stream-only as far as is practical. "No one can download it" is impossible in absolute terms; the agreed target is to make downloading hard and leaks traceable.
+- The site shows lessons organized like the folders in the storage bucket.
+- Very low cost. The owner already has a Cloudflare account with R2 enabled.
+- Deploys happen automatically when the Git repo is connected to Cloudflare (Workers Builds).
+- Frontend is Angular.
+- The first admin must come from Cloudflare configuration, and admins manage students in the app.
 
 ## 2. Decision log
 
 | Decision | Reason |
 | --- | --- |
-| Not YouTube unlisted | The video ID is visible in DevTools and the link is permanent. Hiding the ID in a Cloudflare secret does not help, because the browser must receive it to play the video. |
-| Cloudflare R2 for storage | Egress is free, storage is about $0.015/GB-month. 60 GB costs roughly $0.75 to $1 per month. |
-| Cloudflare Worker serves media | Lets the server check a login before any byte is sent. Supports HTTP range requests, so seeking works. |
-| HLS only (m3u8 plus .ts segments) | No single video file exists to "save as", and download-manager extensions find nothing. A `<video>` plays it through hls.js (Media Source Extensions). Safari plays HLS natively. |
-| Session cookie instead of signed URLs | Media URLs only work with a valid `HttpOnly` session cookie, so a copied link is useless to anyone else. This is simpler than per-URL signed tokens and equally effective against link sharing. |
-| Course structure derived from the bucket | The owner wanted the site to mirror bucket folders. No lesson table exists. Uploading files is the only content-management step. |
-| D1 for users and progress only | Small relational data. Progress is keyed by the R2 object key string. |
-| Schema created lazily by the Worker | The Git deploy flow has no safe place to run migrations before the first deploy (the database does not exist yet). The Worker runs `CREATE TABLE IF NOT EXISTS` once per isolate. Pattern copied from the NodeWarden project. |
-| `wrangler.toml` bindings without IDs | Cloudflare automatically provisions the D1 database and R2 bucket on the first Git deploy. No manual setup, no IDs committed. Also taken from NodeWarden. |
-| Angular 21, not 22 | Angular 22 requires Node 22.22.3 or newer. Cloudflare's build image may be older. Angular 21 supports Node 20.19+ and 22.12+. |
-| No Angular router, no UI library | One screen after login. Fewer dependencies. |
-| hls.js and pdfjs-dist from npm, lazy-loaded | Keeps the first load small (about 51 kB) and avoids a third-party CDN. |
-| PDFs drawn to canvas with pdf.js | Removes the browser PDF toolbar (download and print buttons) and lets a watermark be baked into the page pixels. |
-| Passwords with PBKDF2-SHA256, 100,000 iterations | Available in Web Crypto inside Workers. 100,000 is the maximum Workers allows. |
+| Not YouTube unlisted | The video ID is visible in DevTools and the link is permanent. |
+| Cloudflare R2 for storage | Free egress, about $0.015/GB-month. |
+| Worker serves media | Checks a login before any byte is sent; supports range requests so seeking works. |
+| HLS supported, MP4 also served | The Worker lists and serves both. HLS (`tools/make-hls.sh`) avoids a single downloadable file; plain MP4 is simpler to upload. The old `ALLOW_MP4` switch was removed from the code, so MP4 is always served. |
+| Session cookie, not signed URLs | Media URLs only work with a valid `HttpOnly` cookie, so copied links are useless. |
+| Course structure derived from the bucket | No lesson table. Uploading files is the only content step. Top folder = course, sub-folders = folders, files = lessons. |
+| D1 for users and progress only | Small relational data; progress keyed by R2 object key. |
+| Schema created lazily by the Worker | The Git deploy has no place to run migrations before the database exists. `CREATE TABLE IF NOT EXISTS` runs once per isolate. |
+| `wrangler.toml` bindings without IDs | Cloudflare provisions the D1 database and R2 bucket on the first Git deploy. Bucket is named `course-sourse` (spelling kept on purpose). |
+| First admin from secrets | `ADMIN_EMAIL` + `ADMIN_PASSWORD` are read on every cold start; the user is created if missing and forced to admin. It replaced the old `/api/setup` + `SETUP_KEY` flow. |
+| Admin panel inside the app | Replaced the single "Add student" dialog. No router; `app.ts` toggles between `<app-course>` and `<app-admin>`. |
+| Angular 21, not 22 | Angular 22 needs a newer Node than Cloudflare's build image may have. |
+| No router, no UI library | One screen after login; fewer dependencies. |
+| `ngx-extended-pdf-viewer` | Gives a full PDF reader. Print, download, open, rotate etc. are hidden in `pdf-viewer.ts`. |
+| Native video controls and fullscreen | A custom fullscreen button was tried (to keep the watermark visible) and removed at the owner's request. Trade-off: no watermark in native fullscreen. |
+| Passwords: PBKDF2-SHA256, 100,000 iterations | The maximum Web Crypto allows in Workers. |
+| Optimistic "Mark as complete" | `Api.setDone` updates the UI first and rolls back if the request fails. |
 
 ## 3. Architecture
 
@@ -39,28 +43,31 @@ Browser (Angular SPA)
    |  fetch /api/*  (cookie: s=...)
    v
 Cloudflare Worker  (worker/index.js)
-   |-- static assets: dist/web/browser   (served directly, Worker not invoked)
+   |-- static assets: dist/web/browser   (served directly; Worker only runs for /api/*)
    |-- D1  binding DB      users, watched
-   '-- R2  binding VIDEOS  <Section>/<Lesson>/index.m3u8 + seg_*.ts, <Section>/*.pdf
+   '-- R2  binding VIDEOS  <Course>/<Folder>/.../<file>
 ```
 
-`wrangler.toml` uses `run_worker_first = ["/api/*"]`, so only API paths hit the Worker code. Everything else is served as a static asset from the Angular build output.
+`wrangler.toml` uses `run_worker_first = ["/api/*"]`.
 
 ### File map
 
 | Path | Purpose |
 | --- | --- |
-| `worker/index.js` | Entire backend: auth, course listing, media streaming, progress, admin |
-| `src/app/api.ts` | `Api` service: fetch wrapper and app state as signals (`me`, `course`) |
-| `src/app/app.ts` | Root component: header, sign out, admin toggle; `admin.ts` is the admin panel |
+| `worker/index.js` | Entire backend: auth, admin seeding and endpoints, course listing, media streaming, progress |
+| `src/app/api.ts` | `Api` service: fetch wrapper (GET/POST/DELETE) and app state signals (`me`, `courses`); user-admin calls |
+| `src/app/app.ts` | Root: header (logo, Admin panel toggle, Sign out), switches course/admin views |
 | `src/app/login.ts` | Sign-in form |
-| `src/app/course.ts` | Sidebar with sections, lessons, progress bars, and the lesson view |
-| `src/app/player.ts` | HLS video player with a moving watermark |
-| `src/app/pdf-viewer.ts` | pdf.js reader, renders pages to canvases with a tiled watermark |
-| `src/styles.css` | All styling, light and dark via `prefers-color-scheme` |
-| `angular.json` | Copies `pdf.worker.min.mjs` from pdfjs-dist to `/pdf/` as a static asset |
-| `tools/make-hls.sh` | ffmpeg conversion to HLS, copies PDFs unchanged |
-| `proxy.conf.json` | Dev only: proxies `/api` from `ng serve` to `wrangler dev` on port 8787 |
+| `src/app/course.ts` | Sidebar, folder browser with breadcrumb, lesson view, Mark as complete |
+| `src/app/player.ts` | Video element + moving email watermark (native controls) |
+| `src/app/pdf-viewer.ts` | PDF reader configuration |
+| `src/app/admin.ts` | Admin panel UI |
+| `src/styles.css` | All styling and the bundled logo font |
+| `src/curse-of-the-zombie.ttf` | Logo font (capitals only; CSS uppercases the logo) |
+| `angular.json` | Copies `public/` and the pdf viewer's `assets/` into the build |
+| `tools/make-hls.sh` | ffmpeg conversion to HLS; copies PDFs unchanged |
+| `proxy.conf.json` | Dev only: proxies `/api` from `ng serve` to `wrangler dev` on 8787 |
+| `docs/PLAN-google-login.md` | Planned next feature |
 
 ### Data model (D1)
 
@@ -75,177 +82,126 @@ watched (user_id INTEGER, lesson TEXT, PRIMARY KEY (user_id, lesson))      -- le
 | --- | --- | --- |
 | `POST /api/login`, `/api/logout` | none | Sets or clears the cookie |
 | `GET /api/me` | session | `{id, email, is_admin}` |
-| `GET /api/course` | session | `[{title, lessons:[{id, title, kind:'video'|'pdf', done}]}]` |
-| `GET /api/media/<url-encoded key>` | session | Serves `.m3u8`, `.ts`, `.pdf` (and `.mp4`/`.webm` only if env `ALLOW_MP4=1`) |
+| `GET /api/course` | session | `[{title, sections:[{title, lessons:[{id, title, kind:'video'|'pdf', done}]}]}]`; `section.title` is the sub-path joined by `" / "` or `null` |
+| `GET /api/media/<url-encoded key>` | session | Allow-listed extensions only; range requests; refuses `Sec-Fetch-Dest: document` |
 | `POST /api/progress` | session | `{lesson, done}` |
-| `POST /api/admin/users` | admin | `{email, password}` |
+| `GET /api/admin/users` | admin | Users with `watched` count and `owner` flag |
+| `POST /api/admin/users` | admin | `{email, password, is_admin?}`; validates email and 8+ char password |
+| `POST /api/admin/users/<id>/password` | admin | Reset password |
+| `POST /api/admin/users/<id>/role` | admin | `{is_admin}`; blocked for the Owner and yourself |
+| `DELETE /api/admin/users/<id>` | admin | Deletes user and their `watched` rows; blocked for the Owner and yourself |
 
-Secrets (set in the dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` (first admin is seeded from these). Optional variable: `ALLOW_MP4`.
+Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
 
-### Course discovery (`listCourse` in the Worker)
+### Course discovery (`listCourse`)
 
-1. List all R2 keys (paginated, 1000 per call). Cached in module memory for 60 seconds per isolate.
-2. Keep keys ending in `.m3u8` or `.pdf` (plus mp4/webm if `ALLOW_MP4=1`).
-3. Section = the directory path joined with " / " (or "Lessons" if the file is at the root).
-4. For `.m3u8` the lesson title is the parent folder name. For PDFs it is the file name without extension.
-5. Sort sections and lessons with a numeric-aware collator, so `02` sorts before `10`.
+1. List all R2 keys (paginated, 1000 per call); cached in memory for 60 s per isolate.
+2. Keep videos (`mp4 webm mkv mov avi m4v m3u8`) and `.pdf`; skip `.ts` segments and root-level files.
+3. Course = first path segment. Section = remaining directories joined by `" / "` (empty = course root).
+4. `.m3u8` lessons are titled by their parent folder; others by file name without extension.
+5. Sort with a numeric-aware collator.
 
-### Media serving (`serve` in the Worker)
-
-- Allow-list of extensions; everything else returns 403.
-- Refuses requests with `Sec-Fetch-Dest: document`, so opening a media URL in the address bar fails.
-- Passes the request headers to `R2.get(key, {range})` and builds a 200 or 206 response with `Content-Range`.
-- Sets `Cache-Control: private, no-store`, `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`.
+The Angular browser (`course.ts`) rebuilds the folder tree from `section.title` and shows only the current level.
 
 ### Auth
 
 - Cookie `s=<base64url(JSON{uid,exp})>.<base64url(HMAC-SHA256 with SESSION_SECRET)>`, `HttpOnly; Secure; SameSite=Strict`, 7 days.
-- Each request re-reads the user row, so deleting a user row ends their sessions.
-- CSRF relies on `SameSite=Strict` plus JSON request bodies.
+- Each request re-reads the user row, so deleting a user ends their sessions immediately.
+- Admin seeding (`seedAdmin`) runs inside `ensureSchema`.
+- CSRF relies on `SameSite=Strict` plus JSON bodies.
 
-### Download deterrents (frontend)
+### Frontend notes
 
-- Video: `controlsList="nodownload noremoteplayback"`, `disablePictureInPicture`, context menu disabled, native fullscreen button hidden in Chromium (a custom button fullscreens the wrapper so the watermark stays visible). The student's email moves to a random position every 15 seconds.
-- PDF: canvas rendering, no toolbar, text not selectable, email tiled at 12% opacity into each page canvas.
+- Signals everywhere; `Api.me` is `undefined` while checking the session, `null` when signed out.
+- The lesson view reads the live lesson from `api.courses()` (computed `lesson()`), so the button state is always current. Back returns to the folder the lesson was opened from.
+- Styling uses tokens (`--bg --panel --ink --acc ...`), automatic light/dark, and a phone layout at ≤760 px (course chips strip, stacked lesson bar, edge-to-edge video, single-column admin). `html` carries the background gradient so short pages (login) have no band.
+- Adding a font file: keep it next to `styles.css` and reference it with a relative `url("./...")` so the build bundles it.
 
 ## 4. What has and has not been verified
 
-Verified in a sandbox:
+Verified (this session, in a sandbox without npm access):
+- `worker/index.js` passes `node --check`.
+- CSS and markup were rendered on mock pages in headless Chromium (login, folder browser, player bar, admin panel; dark, light, 320-1440 px). An automated check found no overflow, off-screen or overlapping elements. The native video fullscreen icon was checked in Chromium.
 
-- `ng build` succeeds (Angular 21.2, TypeScript strict templates).
-- The Worker ran under `wrangler dev` with local D1 and R2 seeded with a fake HLS lesson, an MP4, and a PDF. Checked with curl: first-admin setup, wrong and right login, unauthenticated rejection, course listing built from keys, playlist and PDF content types, a 206 range response with the correct `Content-Range`, MP4 blocked by default, `Sec-Fetch-Dest: document` blocked, progress saved, student rejected from the admin endpoint, static site and `/pdf/pdf.worker.min.mjs` served.
+Verified in an earlier sandbox (original build):
+- `ng build` succeeded; the Worker ran under `wrangler dev`; curl checks of login, course listing, range responses, progress and static assets passed.
 
 Not verified (treat as unknown):
-
-- Any click-through in a real browser: layout, the lesson list, watermark placement, fullscreen behavior.
-- Real HLS playback with hls.js, and Safari native HLS.
-- pdf.js v6 rendering. `page.render` is called with both `canvas` and `canvasContext` to be safe across versions; confirm there are no console warnings.
-- An actual Cloudflare Git-connected deploy, including automatic provisioning of the D1 database and R2 bucket and the Node version in the build image.
-- Behavior on the Workers Free plan CPU limit (10 ms). PBKDF2 at 100,000 iterations may exceed it on login.
-- Behavior with large libraries (hundreds of lessons) and 30 to 60 GB of real video.
+- `ng build` after the admin, course.ts, api.ts and styles changes (no network in the editing sandbox). Run `npm run build` first.
+- The admin endpoints, admin seeding and the new Back/optimistic-progress behavior end to end.
+- The PDF viewer layout after the CSS changes (`app-pdf-viewer` fills the lesson area; check the toolbar and page fit).
+- Real HLS playback, Safari, and Workers Free CPU limits (PBKDF2 100k iterations may exceed 10 ms on login).
+- Large libraries (hundreds of lessons) and 30-60 GB of real media.
 
 ## 5. Known limitations and risks
 
-1. A signed-in technical student can still capture the stream (for example `yt-dlp` with their cookie), and anyone can screen-record. There is no DRM.
-2. The video watermark is a DOM element and can be removed with DevTools. The PDF watermark is baked into the canvas pixels but not into the raw PDF that is fetched.
-3. HLS segments are not encrypted. Protection relies on the session cookie only.
+1. A signed-in technical student can still capture or fetch media with their cookie (`yt-dlp`, or the file URL for plain MP4/PDF). No DRM.
+2. The video watermark is a DOM element, removable with DevTools, and absent in native fullscreen. PDFs have no watermark.
+3. HLS segments are not encrypted; protection is the session cookie only.
 4. No login rate limiting or lockout.
-5. No password change or reset, no student list, no delete or disable student. Admin can only add students.
-6. Progress is keyed by R2 object key, so renaming a folder or file loses that lesson's progress.
-7. `listCourse` lists the whole bucket per cold isolate and cache expiry (cheap, but it grows with bucket size).
-8. The schema helper only creates missing tables. Altering a table needs a manual `wrangler d1 execute`.
-9. The Worker is plain JavaScript with no tests and no types.
-10. The converter re-encodes everything to a single 6-second-segment H.264 rendition. There is no adaptive bitrate, so slow connections may buffer.
+5. No password change by the student, no self-service reset, no "disable" (only delete).
+6. Progress is keyed by R2 object key, so renaming loses it.
+7. `listCourse` lists the whole bucket per cold isolate/cache expiry.
+8. The schema helper only creates missing tables; altering a table needs a manual `wrangler d1 execute` or a try/catch `ALTER` step.
+9. The Worker is plain JavaScript with no tests; the frontend has no tests.
+10. Changing `ADMIN_PASSWORD` after the first run does not update the stored hash.
+11. The logo font is free for personal use only.
+12. `@angular/router` is listed in `package.json` but not used.
 
-## 6. Optimization backlog (suggested order)
+## 6. Backlog (suggested order)
 
-1. Run it in a browser end to end and fix whatever breaks (player, PDF reader, fullscreen, mobile layout).
-2. Add login rate limiting with the Workers Rate Limiting binding or a Cloudflare rule.
-3. Admin features: list, disable, delete students, reset password. Add `DELETE` and `PATCH` endpoints and a small admin view.
-4. Resume playback position per lesson (store seconds in D1) and deep links such as `#lesson=<key>`.
-5. Multi-bitrate HLS (for example 360p, 720p, 1080p) with a master playlist.
-6. Encrypt HLS segments with AES-128 and serve the key from an authenticated endpoint with a short-lived, per-session key URL.
-7. Generate a `manifest.json` during upload (extend `make-hls.sh`) so the Worker does not list the bucket, or cache the listing in KV.
-8. Render PDF pages lazily with `IntersectionObserver` for very long documents.
-9. Port `worker/index.js` to TypeScript, split into modules (auth, course, media), and add tests using Vitest with `@cloudflare/vitest-pool-workers`.
-10. Add GitHub Actions for build and type checks on pull requests.
-11. Move to stateful sessions (a `sessions` table) if instant revocation and device management are needed.
-12. Consider a paid DRM or per-user server-side watermarking service if leaks become a real problem.
+1. Run `npm run build`, open the site, and fix whatever breaks (PDF layout, admin flows, mobile).
+2. Google login: see `docs/PLAN-google-login.md`.
+3. Login rate limiting (Workers Rate Limiting binding or a Cloudflare rule).
+4. Student password change; optional "disable user" instead of delete.
+5. Resume playback position per lesson (store seconds in D1) and deep links.
+6. Watermark support in fullscreen (custom fullscreen on the wrapper) and on PDFs, if leak tracing matters.
+7. Multi-bitrate HLS and AES-128 segment encryption with an authenticated key endpoint.
+8. Generate a `manifest.json` at upload time so the Worker does not list the bucket (or cache in KV).
+9. Port the Worker to TypeScript, split into modules, add Vitest tests (`@cloudflare/vitest-pool-workers`).
+10. GitHub Actions for build and type checks on pull requests.
+11. Stateful sessions (a `sessions` table) for instant revocation and device lists.
+12. A paid DRM or per-user watermarking service if leaks become a real problem.
 
-## 7. Constraints to respect while optimizing
+## 7. Constraints to respect
 
-- Keep it on Cloudflare Workers, R2, and D1, and keep the cost near zero.
-- Keep `wrangler.toml` bindings without IDs, so Git deploys self-provision.
-- Keep the deploy command `npm run deploy` (builds Angular, then `wrangler deploy`).
+- Stay on Cloudflare Workers, R2 and D1; keep cost near zero.
+- Keep `wrangler.toml` bindings without IDs so Git deploys self-provision.
+- Keep the deploy command `npm run deploy` (Angular build, then `wrangler deploy`).
 - Keep Angular 21 unless the Cloudflare build Node version is confirmed to support a newer release.
 - Keep the Worker `/api` contract and the Angular `Api` service in sync; change both together.
-- Never commit secrets, `.dev.vars`, `node_modules`, `dist`, or any video or PDF files.
-- Videos and PDFs are uploaded with `rclone` to R2, never through git.
+- Never commit secrets, `.dev.vars`, `node_modules`, `dist`, or media files.
+- Upload media with `rclone`, never through git.
 
 ## 8. Run and test
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars
+cp .dev.vars.example .dev.vars     # SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD
 npm run build
-npm run api      # terminal 1: Worker on http://localhost:8787 (local D1 and R2)
-npm start        # terminal 2: Angular on http://localhost:4200
+npm run api      # Worker on http://localhost:8787 (local D1 and R2)
+npm start        # Angular on http://localhost:4200
 ```
 
-Seed local R2 for testing:
+Smoke test (cookie jar `-c`/`-b`; uses the admin from `.dev.vars`):
 
 ```bash
-npx wrangler r2 object put "course-videos/01 Basics/Notes.pdf" --file ./Notes.pdf --local
-```
-
-Smoke test (cookie jar `-c`/`-b`):
-
-```bash
-curl -X POST localhost:8787/api/setup -H "x-setup-key: setup123" -H "content-type: application/json" -d '{"email":"a@x.com","password":"longpassword1"}'
-curl -c jar -X POST localhost:8787/api/login -H "content-type: application/json" -d '{"email":"a@x.com","password":"longpassword1"}'
+curl -c jar -X POST localhost:8787/api/login -H "content-type: application/json" -d '{"email":"admin@example.com","password":"<ADMIN_PASSWORD>"}'
+curl -b jar localhost:8787/api/me
 curl -b jar localhost:8787/api/course
-curl -b jar -H "Range: bytes=0-99" "localhost:8787/api/media/01%20Basics/Notes.pdf" -i
+curl -b jar localhost:8787/api/admin/users
+curl -b jar -X POST localhost:8787/api/admin/users -H "content-type: application/json" -d '{"email":"s@x.com","password":"longpassword1"}'
+curl -b jar -H "Range: bytes=0-99" "localhost:8787/api/media/Demo/Notes.pdf" -i
 ```
 
-## 9. Prompt to give another AI
+## 9. Uploading course content to R2
 
-> Read `docs/HANDOFF.md` and `README.md` first, then review the code in `worker/index.js` and `src/app/`. Do not change the platform (Cloudflare Workers, R2, D1) or the Git-based deploy flow. Start with section 6 of the handoff, items 1 to 4. For every change, explain what you changed and why, keep the Worker API and the Angular `Api` service consistent, and tell me anything you could not verify.
-
-## 10. Uploading course videos to R2
-
-### Bucket name
-`course-sourse`
-
-### R2 structure
-- Top-level folder = Course name (shown in sidebar)
-- Sub-folder inside course = Section (shown as a labeled group)
-- Files at any level = Lessons
-
-Examples:
-```
-Python Basics/intro.mp4                        → course "Python Basics", lesson "intro"
-Python Basics/Chapter 1/variables.mp4          → course "Python Basics", section "Chapter 1", lesson "variables"
-Another Course/lesson1.mp4                     → separate course "Another Course"
-```
-
-### Upload large files (300MB+) with rclone
-
-The Cloudflare dashboard and Wrangler both have a 300MB upload limit. Use rclone for larger files.
-
-Configure rclone (one time):
-```bash
-rclone config update r2 \
-  access_key_id=<R2_ACCESS_KEY_ID> \
-  secret_access_key=<R2_SECRET_ACCESS_KEY> \
-  endpoint=https://<ACCOUNT_ID>.r2.cloudflarestorage.com \
-  provider=Cloudflare \
-  no_check_bucket=true
-```
-
-Upload a file:
-```bash
-rclone copy "/path/to/video.mp4" r2:course-sourse/CourseName/ --progress
-```
-
-### Fix mp4 files before uploading (required)
-
-Raw or screen-recorded mp4s usually have their `moov` atom (metadata) at the end of the file. The browser cannot start streaming until it downloads the entire file. Fix this before uploading:
+Bucket: `course-sourse`. See the README for the folder mapping, the `rclone` setup and the MP4 `-movflags +faststart` fix (required for plain MP4 so playback starts without downloading the whole file).
 
 ```bash
-ffmpeg -i input.mp4 -c copy -movflags +faststart output.mp4
+rclone copy "/path/to/video.mp4" "r2:course-sourse/Course Name/" --progress
 ```
 
-This does not re-encode — it only moves the metadata to the front. Takes ~30 seconds even for large files.
+## 10. Prompt to give another AI
 
-Fix all mp4s in a folder at once:
-```bash
-for f in /path/to/course/*.mp4; do
-  ffmpeg -i "$f" -c copy -movflags +faststart "${f%.mp4}_fixed.mp4"
-done
-```
-
-Always upload the `_fixed` version to R2.
-
-## 11. Next planned feature
-
-Google login (invite-only, ID-token flow): see `docs/PLAN-google-login.md`.
+> Read `docs/HANDOFF.md`, `README.md` and `docs/PLAN-google-login.md` first, then review `worker/index.js` and `src/app/`. Do not change the platform (Cloudflare Workers, R2, D1) or the Git-based deploy flow. Start with section 6 of the handoff. For every change, explain what you changed and why, keep the Worker API and the Angular `Api` service consistent, and tell me anything you could not verify.
