@@ -624,6 +624,11 @@ const handle = async (req, env) => {
               env.DB.prepare('DELETE FROM watched WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM video_notes WHERE user_id = ?').bind(id),
+              // Their top-level comments take other students' replies with them, the same
+              // way deleting a comment does, so no invisible orphan replies are left behind.
+              env.DB.prepare('DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE user_id = ?)').bind(id),
+              env.DB.prepare('DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE parent_id IN (SELECT id FROM comments WHERE user_id = ?))').bind(id),
+              env.DB.prepare('DELETE FROM comments WHERE parent_id IN (SELECT id FROM comments WHERE user_id = ?)').bind(id),
               env.DB.prepare('DELETE FROM comments WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM comment_likes WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM enrollments WHERE user_id = ?').bind(id),

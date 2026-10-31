@@ -123,6 +123,10 @@ export class Discussion {
   protected readonly error = signal('');
   protected readonly replyTo = signal<number | null>(null);
   private readonly expanded = signal<ReadonlySet<number>>(new Set());
+  /** Avoids reloading when the parent passes a new Lesson object for the same id. */
+  private currentId = '';
+  /** Drops responses from superseded loads (e.g. the initial GET landing after a post). */
+  private seq = 0;
 
   protected readonly top = computed(() => this.rows().filter((c) => c.parent_id == null));
   private readonly byParent = computed(() => {
@@ -137,14 +141,16 @@ export class Discussion {
 
   constructor() {
     effect(() => {
-      const key = this.lesson().id;
+      const lesson = this.lesson();
+      if (lesson.id === this.currentId) return; // progress toggles hand over a new object
+      this.currentId = lesson.id;
       untracked(() => {
         this.replyTo.set(null);
         this.draft.set('');
         this.replyDraft.set('');
         this.error.set('');
         this.expanded.set(new Set());
-        void this.load(key);
+        void this.load(lesson.id);
       });
     });
   }
@@ -176,15 +182,16 @@ export class Discussion {
   protected reload(): void { void this.load(this.lesson().id); }
 
   protected async load(key = this.lesson().id): Promise<void> {
+    const seq = ++this.seq;
     this.state.set('loading');
     try {
       const r = await this.api.comments(key);
-      if (key !== this.lesson().id) return;
+      if (seq !== this.seq || key !== this.lesson().id) return;
       this.rows.set(r.comments);
       this.state.set('ready');
       this.count.emit(r.comments.length);
     } catch {
-      if (key !== this.lesson().id) return;
+      if (seq !== this.seq || key !== this.lesson().id) return;
       this.state.set('error');
     }
   }

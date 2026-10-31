@@ -79,16 +79,20 @@ export class LessonResources {
   protected readonly saving = signal(false);
   protected readonly error = signal('');
   protected readonly isAdmin = computed(() => this.api.me()?.is_admin === 1);
+  private currentId = '';
+  private seq = 0;
 
   constructor() {
     effect(() => {
-      const key = this.lesson().id;
+      const lesson = this.lesson();
+      if (lesson.id === this.currentId) return; // progress toggles hand over a new object
+      this.currentId = lesson.id;
       untracked(() => {
         this.title.set('');
         this.url.set('');
         this.note.set('');
         this.error.set('');
-        void this.load(key);
+        void this.load(lesson.id);
       });
     });
   }
@@ -100,15 +104,16 @@ export class LessonResources {
   protected reload(): void { void this.load(this.lesson().id); }
 
   protected async load(key = this.lesson().id): Promise<void> {
+    const seq = ++this.seq;
     this.state.set('loading');
     try {
       const r = await this.api.resources(key);
-      if (key !== this.lesson().id) return;
+      if (seq !== this.seq || key !== this.lesson().id) return;
       this.rows.set(r.resources);
       this.state.set('ready');
       this.count.emit(r.resources.length);
     } catch {
-      if (key !== this.lesson().id) return;
+      if (seq !== this.seq || key !== this.lesson().id) return;
       this.state.set('error');
     }
   }

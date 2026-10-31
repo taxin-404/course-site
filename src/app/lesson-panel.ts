@@ -70,16 +70,24 @@ export class LessonPanel {
   private loadedKey = '';
   /** True when the user typed before this lesson's note arrived; their text wins. */
   private typedWhileLoading = false;
+  /** The lesson id the panel is currently showing, so a new Lesson object with the
+   *  same id (progress toggles do that) does not reload and clear the textarea. */
+  private currentId = '';
+  /** False until the note has loaded (or the user typed after a failed load), so a
+   *  failed GET can never cause a flush that deletes the saved note. */
+  private canSave = false;
   private savedText = '';
   private seq = 0;
   private timer?: ReturnType<typeof setTimeout>;
 
   constructor() {
     effect(() => {
-      const key = this.lesson().id;
+      const lesson = this.lesson();
+      if (lesson.id === this.currentId) return; // same lesson, new object: keep the panel as is
+      this.currentId = lesson.id;
       untracked(() => {
         this.flush(); // finish the previous lesson's pending edit against its own key
-        void this.load(key);
+        void this.load(lesson.id);
       });
     });
     inject(DestroyRef).onDestroy(() => this.flush());
@@ -109,6 +117,7 @@ export class LessonPanel {
       this.typedWhileLoading = true;
       return;
     }
+    this.canSave = true;
     this.noteStatus.set('saving');
     this.timer = setTimeout(() => void this.save(), 800);
   }
@@ -118,16 +127,23 @@ export class LessonPanel {
     clearTimeout(this.timer);
     const key = this.loadedKey;
     const text = this.note();
-    if (!key || text === this.savedText) return;
-    this.savedText = text;
-    void this.api.saveVideoNotes(key, text).catch(() => {
-      if (key === this.loadedKey) this.noteStatus.set('error');
-    });
+    if (!key || !this.canSave || text === this.savedText) return;
+    this.noteStatus.set('saving');
+    void this.api.saveVideoNotes(key, text)
+      .then(() => {
+        // Only record success: a failed flush must be retried by the next one.
+        if (key === this.loadedKey) {
+          this.savedText = text;
+          this.noteStatus.set(this.note() === text ? 'saved' : 'saving');
+          if (this.note() !== text) this.schedule();
+        }
+      })
+      .catch(() => { if (key === this.loadedKey) this.noteStatus.set('error'); });
   }
 
   private async save(): Promise<void> {
     const key = this.loadedKey;
-    if (!key) return;
+    if (!key || !this.canSave) return;
     const text = this.note();
     if (text === this.savedText) {
       this.noteStatus.set(text ? 'saved' : 'idle');
@@ -154,6 +170,7 @@ export class LessonPanel {
     this.loadedKey = '';
     this.savedText = '';
     this.typedWhileLoading = false;
+    this.canSave = false;
     this.note.set('');
     this.noteStatus.set('idle');
     try {
@@ -161,6 +178,7 @@ export class LessonPanel {
       if (seq !== this.seq) return;
       this.loadedKey = key;
       this.savedText = r.body;
+      this.canSave = true;
       if (this.typedWhileLoading) {
         // Keep what the user typed while the GET was in flight and save that instead.
         this.noteStatus.set('saving');
@@ -170,7 +188,16 @@ export class LessonPanel {
         if (r.body) this.noteStatus.set('saved');
       }
     } catch {
-      if (seq === this.seq) this.noteStatus.set('error');
+      if (seq !== this.seq) return;
+      // Keep the box usable after a failed load. Saving stays off unless the user
+      // typed something, so leaving the lesson cannot delete an unread note.
+      this.loadedKey = key;
+      this.noteStatus.set('error');
+      if (this.typedWhileLoading) {
+        this.canSave = true;
+        this.noteStatus.set('saving');
+        this.schedule();
+      }
     }
   }
 }
