@@ -136,12 +136,13 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 .adm-card{background:var(--panel);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
 .adm-card-head{display:flex;width:100%;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.2rem;background:none;border:0;border-radius:0;box-shadow:none;text-align:left}
 .adm-card-head:hover{background:var(--acc-soft);box-shadow:none}
-.adm-card-title{display:grid;gap:.1rem}
+.adm-card-title{display:grid;gap:.1rem;min-width:0}
 .adm-card-title strong{font-weight:650}
-.adm-card-title small{color:var(--mute);font-size:.82rem}
+.adm-card-title small{color:var(--mute);font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .adm-caret{color:var(--mute);transition:transform .18s}
 .adm-caret.open{transform:rotate(180deg)}
 .adm-card-body{padding:0 1.2rem 1.1rem}
+.adm-card-body .adm-muted.sm{margin:0 0 .7rem}
 
 /* Chips / checkboxes */
 .adm-chips{display:flex;flex-wrap:wrap;gap:.5rem}

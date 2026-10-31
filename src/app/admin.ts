@@ -7,6 +7,21 @@ interface Confirm { title: string; body: string; label: string; danger: boolean;
 interface Toast { id: number; text: string; bad: boolean }
 
 const PW_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
+
+// The default course access is a convenience preset, remembered per browser so adding
+// several batches of students does not mean re-ticking the same courses every time.
+const PICK_KEY = 'course-site.admin.defaultCourses';
+function readPick(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(PICK_KEY) || '[]');
+    return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function savePick(pick: string[]): void {
+  try { localStorage.setItem(PICK_KEY, JSON.stringify(pick)); } catch { /* private mode: keep it in memory only */ }
+}
 const ROLES: { key: RoleFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'student', label: 'Students' },
@@ -49,15 +64,16 @@ const ROLES: { key: RoleFilter; label: string }[] = [
 
       <!-- Default access for new users -->
       <section class="adm-card">
-        <button type="button" class="adm-card-head" [attr.aria-expanded]="showDefaults()" (click)="showDefaults.set(!showDefaults())">
+        <button type="button" class="adm-card-head" [attr.aria-expanded]="showDefaults()" [title]="pick().length ? pick().join(', ') : 'No default courses'" (click)="showDefaults.set(!showDefaults())">
           <span class="adm-card-title">
             <strong>Default course access</strong>
-            <small>{{ pick().length }} selected · pre-filled whenever you add users</small>
+            <small>{{ pickSummary() }}</small>
           </span>
           <span class="adm-caret" [class.open]="showDefaults()">▾</span>
         </button>
         @if (showDefaults()) {
           <div class="adm-card-body">
+            <p class="adm-muted sm">Pre-ticked in Add users; adjust per batch.</p>
             <div class="adm-chips">
               @for (c of courseList(); track c) {
                 <label class="chip" [class.on]="pick().includes(c)">
@@ -379,7 +395,14 @@ export class Admin implements OnInit {
   protected readonly role = signal<RoleFilter>('all');
   protected readonly sort = signal<SortKey>('email');
   protected readonly showDefaults = signal(true);
-  protected readonly pick = signal<string[]>([]);
+  protected readonly pick = signal<string[]>(readPick());
+  /** Shown on the collapsed card: which courses, or that there are none. Kept short so it
+   *  still fits on a phone; the full list is the tooltip and the open card. */
+  protected readonly pickSummary = computed(() => {
+    const p = this.pick();
+    if (!p.length) return 'None — new users get no courses';
+    return p.length === 1 ? p[0] : `${p[0]} +${p.length - 1} more`;
+  });
 
   protected readonly selected = signal<Set<number>>(new Set());
 
@@ -451,7 +474,13 @@ export class Admin implements OnInit {
     void this.load();
     this.api
       .adminCourses()
-      .then((c) => this.courseList.set(c))
+      .then((c) => {
+        this.courseList.set(c);
+        // Drop remembered courses that no longer exist in the bucket, so a renamed or
+        // deleted course is never handed out as a default again.
+        const keep = this.pick().filter((x) => c.includes(x));
+        if (keep.length !== this.pick().length) { this.pick.set(keep); savePick(keep); }
+      })
       .catch(() => this.toast('Could not load the course list.', true));
   }
 
@@ -495,6 +524,7 @@ export class Admin implements OnInit {
   // ---- default access / drawer ------------------------------------------
   protected togglePick(c: string): void {
     this.pick.update((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
+    savePick(this.pick());
   }
 
   protected open(u: AdminUser): void {
