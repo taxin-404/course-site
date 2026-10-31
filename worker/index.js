@@ -32,9 +32,15 @@ async function getUser(req, env) {
   // 'ver' changes on password reset / role change, which signs the user out everywhere
   return u && (d.v || 0) === u.ver ? u : null;
 }
-async function sessionCookie(u, env) {
+// 'Secure' is only sent over HTTPS: browsers reject a Secure cookie on a plain-HTTP
+// origin (e.g. the dev server over http://192.168.0.101:4200), which made the login
+// appear to do nothing on a phone while localhost — treated as trustworthy — worked.
+async function sessionCookie(u, env, secure) {
   const p = b64(enc.encode(JSON.stringify({ uid: u.id, v: u.ver || 0, exp: Date.now() + 7 * 864e5 })));
-  return `s=${p}.${await hmac(env.SESSION_SECRET, p)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800`;
+  return `s=${p}.${await hmac(env.SESSION_SECRET, p)}; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict; Path=/; Max-Age=604800`;
+}
+function clearCookie(secure) {
+  return `s=; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict; Path=/; Max-Age=0`;
 }
 
 const SCHEMA = [
@@ -306,7 +312,8 @@ export default {
 
 const handle = async (req, env) => {
   {
-    const { pathname: path } = new URL(req.url);
+    const { pathname: path, protocol } = new URL(req.url);
+    const secure = protocol === 'https:';
     const m = req.method;
     try {
       await ensureSchema(env);
@@ -325,7 +332,7 @@ const handle = async (req, env) => {
           if (u.google_sub && u.google_sub !== c.sub) return json({ error: 'This email is linked to a different Google account' }, 403);
           await env.DB.prepare('UPDATE users SET google_sub = ? WHERE id = ?').bind(c.sub, u.id).run();
         }
-        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u, env) });
+        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u, env, secure) });
       }
       if (path === '/api/login' && m === 'POST') {
         const { email, password } = await req.json();
@@ -334,9 +341,9 @@ const handle = async (req, env) => {
         if (await locked(env, keys)) return tooMany();
         const u = await env.DB.prepare('SELECT id, pass, ver FROM users WHERE email = ?').bind(em).first();
         if (!u || !(await checkPw(String(password || ''), u.pass))) { await noteFail(env, keys); return json({ error: 'Wrong email or password' }, 401); }
-        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u, env) });
+        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u, env, secure) });
       }
-      if (path === '/api/logout' && m === 'POST') return json({ ok: true }, 200, { 'set-cookie': 's=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0' });
+      if (path === '/api/logout' && m === 'POST') return json({ ok: true }, 200, { 'set-cookie': clearCookie(secure) });
 
       const u = await getUser(req, env);
       if (!u) return json({ error: 'Not logged in' }, 401);
