@@ -191,7 +191,7 @@ See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 
 - `public/_headers` now names the R2 endpoint in the report-only CSP's `connect-src`.
 - The bucket has an R2 lifecycle rule (`abort-incomplete-uploads`, Age 604800 s) that aborts incomplete multipart uploads after 7 days.
 
-Verified: `ng build`; the API suites (`46/46` file-manager checks, `35/35` discussion/notes/resources regression checks); in Chromium at 1200/393/320 px the tree, new folder, rename, delete-with-typed-name, drop overlay and root-upload refusal. Real uploads to `course-sourse` confirmed with `rclone size`: a 900 KB file by single PUT, 20 MiB and 60 MiB by multipart. A reload at 8 parts left only part 7 to re-send (checked against `ListParts` and the page's resource timings), and the file then completed at exactly 60 MiB. Test objects were deleted afterwards.
+Verified: `ng build`; the local API suites (`59/59` file-manager checks, `35/35` discussion/notes/resources regression checks); and a live pass against the deployed Worker with a throwaway admin, student and course: `44/44` API checks, then Chromium at 1200/393/320 px covering create course/section, single-PUT and multipart uploads, drag-and-drop, duplicate-name **Replace**, rename/move (including Unicode and `&`/parentheses), Escape closing a dialog, delete file/folder/course, long-name truncation and no horizontal overflow. Real uploads were confirmed with `rclone size` (900 KB by single PUT; 20 MiB and 60 MiB by multipart). A 60 MiB upload reloaded after 6 of 8 parts resumed at 80% and completed at exactly 60 MiB. Cancelling during the start call, mid-parts, during a single PUT, and on a paused row after a reload left no object and no multipart upload. Test objects, users and enrollments were removed afterwards.
 
 ## 5. Known limitations and risks
 
@@ -245,6 +245,8 @@ npm run build
 npm run api      # Worker on http://localhost:8787 (local D1 and R2)
 npm start        # Angular on http://localhost:4200
 ```
+
+In dev the bindings use local D1/R2, but multipart uploads are signed and sent through the S3 API with the `R2_*` values from `.dev.vars`, so a local upload run writes real parts to `course-sourse`. Clean up test keys after a run; a crashed run can leave an incomplete upload, which the bucket lifecycle rule aborts after 7 days.
 
 Smoke test (cookie jar `-c`/`-b`; uses the admin from `.dev.vars`):
 
