@@ -1,6 +1,6 @@
 # Plan: Google login
 
-Status: planned, not implemented. Part of the backlog in `docs/HANDOFF.md` (section 6).
+Status: **implemented** (steps 2-4 below are in the code; step 1, the Google Cloud setup, is manual). Not yet run end to end against real Google. Part of the backlog in `docs/HANDOFF.md` (section 6).
 
 The Worker, `Api` service and admin panel referenced below are described in `README.md` and `docs/HANDOFF.md`.
 
