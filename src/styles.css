@@ -251,6 +251,14 @@ app-pdf-viewer .viewer-wrap ngx-extended-pdf-viewer{position:absolute;inset:0;he
 .notes-controls .reset:hover:not(:disabled){background:var(--danger-soft);color:var(--danger)}
 app-pdf-viewer #viewerContainer,app-pdf-viewer .zoom{background:var(--bg)}
 app-pdf-viewer #viewerContainer{background:color-mix(in srgb,var(--bg) 90%,var(--text))}
+/* One-time notes hint over the PDF: readable, bottom-centre, drains over 10s. */
+.pdf-hint{position:absolute;left:50%;bottom:1rem;z-index:5;width:min(600px,calc(100% - 2rem));display:flex;align-items:center;gap:.75rem;padding:.8rem .7rem .8rem 1.05rem;transform:translateX(-50%);background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--r-dialog);overflow:hidden;box-shadow:0 10px 34px rgb(15 23 42 / 28%)}
+.pdf-hint-text{flex:1;font-size:1.02rem;line-height:1.4}
+.pdf-hint-x{flex:none;width:32px;height:32px;border:0;border-radius:var(--r-ctl);background:var(--hover);color:var(--text);font-size:20px;line-height:1;cursor:pointer}
+.pdf-hint-x:hover{background:var(--border)}
+.pdf-hint-bar{position:absolute;left:0;bottom:0;width:100%;height:4px;background:var(--primary);transform-origin:left;animation:pdf-hint-drain 10s linear forwards}
+@keyframes pdf-hint-drain{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+@media (prefers-reduced-motion:reduce){.pdf-hint-bar{display:none}}
 
 /* ===== Lesson panel: discussion, notes, resources ===== */
 .lp{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-surface);overflow:hidden}

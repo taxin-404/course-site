@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Added (PDF notes hint)
+- **A one-time hint now tells students they can annotate a PDF and that their notes are private.** It lives in the shared `app-pdf-viewer`, so it appears in both a PDF lesson and the resource-PDF modal. It shows once per student (`localStorage['pdf-hint-seen:<userId>']`), sits at the bottom-centre over the page at ~1rem, drains a 4px bar over 10s, and has a labelled dismiss button that hides it immediately. `prefers-reduced-motion` drops the bar. Verified with `npm test` (6 helper tests) plus `typecheck`, `build`, `check:scripts`, and a live headless check on dev.
+
 ### Fixed (options menu)
 - **"Sign out everywhere" is now admin-only.** The options menu is shared by the header and the admin toolbars and rendered every item for everyone, so students saw a "Sign out everywhere" action that, after single-device login, does nothing plain "Sign out" doesn't — a student account has one live session at a time, so there are no other devices to end, and the confirm text ("You will need to sign in again on each one.") promised several. The item is now gated behind `@if (isAdmin())`, exactly like the Admin-panel item, so admins keep the cross-device kill switch and students see only the theme switch and Sign out. `docs/SECURITY.md` was corrected to match.
 

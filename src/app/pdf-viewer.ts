@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, injec
 import { AnnotationEditorLayerRenderedEvent, NgxExtendedPdfViewerModule, NgxExtendedPdfViewerService, pdfDefaultOptions } from 'ngx-extended-pdf-viewer';
 import { Api } from './api';
 import { Theme } from './theme';
+import { PDF_HINT_MS, markHintSeen, shouldShowHint, type HintStore } from './pdf-hint';
 
 // Open fast: stream the file, fetch only the pages being viewed, in larger chunks
 // (default is 64 KB range requests with streaming off, which means many slow round trips).
@@ -70,6 +71,13 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
         (annotationEditorLayerRendered)="onEditorLayer($event)"
         (annotationEditorEvent)="onEdit()"
       ></ngx-extended-pdf-viewer>
+      @if (hint()) {
+        <div class="pdf-hint" role="status" aria-live="polite">
+          <span class="pdf-hint-text">You can add notes right on this PDF — they're saved automatically and only you can see them.</span>
+          <button type="button" class="pdf-hint-x" aria-label="Dismiss" title="Dismiss" (click)="dismissHint()">&times;</button>
+          <span class="pdf-hint-bar" aria-hidden="true" [style.animationDuration.ms]="hintMs"></span>
+        </div>
+      }
       <span class="wm pdf" [style.left.%]="x()" [style.top.%]="y()">{{ email() }}</span>
     </div>
   `,
@@ -92,6 +100,9 @@ export class PdfViewer implements OnInit {
   readonly hidden = signal(false);
   readonly ready = signal(false);
   readonly status = signal('');
+  protected readonly hint = signal(false);
+  protected readonly hintMs = PDF_HINT_MS;
+  private hintTimer: ReturnType<typeof setTimeout> | undefined;
   private saved: object[] = []; // every note stored on the server for this PDF
   private applying = false; // true while we add/remove notes ourselves, so those events are not saved
   private loadedKey = ''; // the key whose notes are loaded; a new key resets all note state
@@ -114,6 +125,7 @@ export class PdfViewer implements OnInit {
       window.removeEventListener('keydown', block, true);
       this.narrowQuery.removeEventListener('change', onNarrow);
       clearInterval(markTimer);
+      clearTimeout(this.hintTimer);
       if (this.timer) { clearTimeout(this.timer); void this.save(); }
     });
   }
@@ -202,6 +214,25 @@ export class PdfViewer implements OnInit {
 
   ngOnInit(): void {
     void this.loadNotes(this.key()).catch(() => { /* surfaces in onLoaded */ });
+    this.maybeShowHint();
+  }
+
+  /** Show the notes tip once per student, then remember it even if it times out. */
+  private maybeShowHint(): void {
+    const id = this.api.me()?.id;
+    if (id === undefined) return;
+    let store: HintStore;
+    try { store = localStorage; } catch { return; }
+    if (!shouldShowHint(store, id)) return;
+    markHintSeen(store, id);
+    this.hint.set(true);
+    this.hintTimer = setTimeout(() => this.dismissHint(), PDF_HINT_MS);
+  }
+
+  protected dismissHint(): void {
+    clearTimeout(this.hintTimer);
+    this.hintTimer = undefined;
+    this.hint.set(false);
   }
 
   private async apply(notes: object[]): Promise<void> {
