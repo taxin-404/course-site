@@ -28,3 +28,5 @@ hls/
 .DS_Store
 .vscode/
 .idea/
+
+.superpowers/
