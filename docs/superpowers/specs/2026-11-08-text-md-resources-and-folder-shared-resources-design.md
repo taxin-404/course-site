@@ -110,6 +110,23 @@ Broaden the existing kind model (`link`/`pdf` → `link`/`pdf`/`txt`/`md`; lesso
 
 A lesson inherits files from **every** ancestor scope on its path. Only `.pdf`, `.txt`, `.md` files inside a `RESOURCE` folder are shared; other file types there are ignored.
 
+There can be as many `RESOURCE` folders as the owner wants — a course-level one acts **global**, a per-module (or deeper) one is **private to that subtree**, and a lesson gets all of them that enclose it:
+
+```
+MERN Stack/
+  RESOURCE/                  ← global: every lesson in the course
+    syllabus.pdf
+  Module 01/
+    RESOURCE/                ← Module 01 (and anything under it) only
+      cheatsheet.md
+    Sub/
+      RESOURCE/              ← Sub and deeper only
+        notes.txt
+      01 - Intro.mp4         ← inherits syllabus.pdf + cheatsheet.md + notes.txt
+  Module 02/
+    02 - Setup.mp4           ← inherits only syllabus.pdf
+```
+
 **Read (`GET /api/lesson/<key>/resources`).** After the lesson's own rows, compute the lesson's ancestor prefixes; for each, list `<scope>/RESOURCE/` recursively (`env.RESOURCES.list`, cursor-paged) and emit each eligible file as a synthetic resource:
 ```
 { id: 'shared:' + fileKey, title: <file name without extension>,
