@@ -34,6 +34,10 @@ const env = { DB, RESOURCES: r2(FILES), SESSION_SECRET: SECRET, ADMIN_EMAIL: OWN
 const call = (path, { method = 'GET', headers = {}, body, e = env } = {}) =>
   worker.fetch(new Request(ORIGIN + path, { method, headers, body }), e);
 
+// Same browser-fetch markers other route tests use: the media route refuses a request that
+// does not look like a same-origin browser fetch (see mediaRequestOk).
+const browser = (cookie, dest = 'empty') => ({ cookie, 'sec-fetch-site': 'same-origin', 'sec-fetch-dest': dest });
+
 let n = 0;
 async function addUser({ admin = false, pw = STUDENT_PW } = {}) {
   const email = `user${++n}@example.com`;
@@ -135,4 +139,44 @@ test('a D1 timeout on the resources read fails cleanly, it does not hang', async
   });
   assert.equal(res.status, 503);
   assert.deepEqual(await res.json(), { error: 'Database temporarily unavailable' });
+});
+
+test('notes round-trip on a real shared PDF and 404 on an invented key', async () => {
+  const key = 'Course/RESOURCE/syllabus.pdf';
+  const url = '/api/notes/' + encodeURIComponent(key);
+  const put = await call(url, {
+    method: 'PUT',
+    headers: { cookie, origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ data: [{ id: 'a', page: 1 }] }),
+  });
+  assert.equal(put.status, 200);
+  const get = await call(url, { headers: { cookie } });
+  assert.deepEqual((await get.json()).data, [{ id: 'a', page: 1 }]);
+
+  const invented = '/api/notes/' + encodeURIComponent('Course/RESOURCE/does-not-exist.pdf');
+  assert.equal((await call(invented, { headers: { cookie } })).status, 404);
+});
+
+test('an unenrolled student cannot fetch a shared PDF', async () => {
+  const stranger = await addUser();
+  const { cookie: strangerCookie } = await login(stranger);
+  const res = await call('/api/media/Course/RESOURCE/syllabus.pdf', { headers: browser(strangerCookie) });
+  assert.equal(res.status, 403);
+});
+
+test('a shared PDF keeps its notes when it is renamed inside RESOURCE', async () => {
+  const from = 'Course/RESOURCE/syllabus.pdf';
+  await call('/api/notes/' + encodeURIComponent(from), {
+    method: 'PUT',
+    headers: { cookie, origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ data: [{ id: 'z', page: 2 }] }),
+  });
+  const mv = await call('/api/admin/files/move', {
+    method: 'POST',
+    headers: { cookie: adminCookie, origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to: 'Course/RESOURCE/renamed.pdf', kind: 'file' }),
+  });
+  assert.equal(mv.status, 200);
+  const after = await call('/api/notes/' + encodeURIComponent('Course/RESOURCE/renamed.pdf'), { headers: { cookie } });
+  assert.deepEqual((await after.json()).data, [{ id: 'z', page: 2 }]);
 });

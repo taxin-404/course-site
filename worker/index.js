@@ -581,6 +581,9 @@ async function lessonAccess(env, u, key) {
   return mine && mine.has(courseOf(key)) ? 'ok' : 'denied';
 }
 const accessError = (access) => access === 'missing' ? json({ error: 'Not found' }, 404) : json({ error: 'Not allowed' }, 403);
+// A shared RESOURCE PDF has no `resources` row, but it is still annotatable while the object
+// really exists in the bucket. Enrollment is already enforced by the caller's `myCourses` check.
+const sharedFileExists = async (env, key) => hasReservedSegment(key) && !!(await env.RESOURCES.head(key));
 async function myCourses(env, u) {
   if (u.is_admin) return null; // null = everything
   return new Set((await env.DB.prepare('SELECT course FROM enrollments WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.course));
@@ -1228,7 +1231,7 @@ const handle = async (req, env, state = {}) => {
         const mineA = await myCourses(env, u);
         if (mineA && !mineA.has(courseOf(lesson))) return json({ error: 'Not allowed' }, 403);
         const realA = await env.DB.prepare('SELECT 1 x FROM resources WHERE file_key = ?').bind(lesson).first();
-        if (!realA && (await lessonAccess(env, u, lesson)) !== 'ok') return json({ error: 'Not found' }, 404);
+        if (!realA && !(await sharedFileExists(env, lesson)) && (await lessonAccess(env, u, lesson)) !== 'ok') return json({ error: 'Not found' }, 404);
         if (m === 'PUT') {
           const type = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
           if (!NOTE_ASSET_TYPES.has(type)) return json({ error: 'That is not an image we can store' }, 415);
@@ -1273,7 +1276,7 @@ const handle = async (req, env, state = {}) => {
         // Notes are only meaningful for a PDF that exists: a lesson in the bucket, or an
         // admin-uploaded resource. This keeps a student from inventing names to fill D1.
         const realFile = await env.DB.prepare('SELECT 1 x FROM resources WHERE file_key = ?').bind(lesson).first();
-        if (!realFile && (await lessonAccess(env, u, lesson)) !== 'ok') return json({ error: 'Not found' }, 404);
+        if (!realFile && !(await sharedFileExists(env, lesson)) && (await lessonAccess(env, u, lesson)) !== 'ok') return json({ error: 'Not found' }, 404);
         if (m === 'GET') {
           const r = await env.DB.prepare('SELECT data FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).first();
           return json({ data: r ? JSON.parse(r.data) : [] });

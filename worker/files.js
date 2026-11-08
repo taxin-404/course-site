@@ -425,6 +425,14 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
   const statements = pairs
     .filter((p) => isLessonKey(p.from) && isLessonKey(p.to))
     .flatMap((p) => LESSON_ROWS.map((sql) => env.DB.prepare(sql).bind(p.to, p.from)));
+  // A shared RESOURCE PDF is not a lesson key, so its private notes and pasted images need
+  // their own move: only a PDF carries annotations, and only when it stays inside a RESOURCE
+  // folder (a move that leaves RESOURCE is already refused above).
+  for (const p of pairs) {
+    if (!hasReservedSegment(p.from) || !hasReservedSegment(p.to) || !/\.pdf$/i.test(p.from)) continue;
+    statements.push(env.DB.prepare('UPDATE OR REPLACE pdf_notes SET lesson = ? WHERE lesson = ?').bind(p.to, p.from));
+    statements.push(env.DB.prepare('UPDATE OR REPLACE note_assets SET lesson = ? WHERE lesson = ?').bind(p.to, p.from));
+  }
   if (!single && !from.includes('/')) {
     statements.push(env.DB.prepare('UPDATE OR REPLACE enrollments SET course = ? WHERE course = ?').bind(to, from));
     statements.push(env.DB.prepare('UPDATE OR REPLACE course_meta SET course = ? WHERE course = ?').bind(to, from));
@@ -493,7 +501,10 @@ async function deleteEntry(env, rawPath, hooks) {
   if (objects.length > 5000) return bad('That folder holds too many files to delete in one go', 413);
 
   const keys = objects.map((o) => o.key);
-  const lessons = new Set([...keys.filter(isLessonKey), ...(await lessonKeysUnder(env, p, single))]);
+  // A shared RESOURCE PDF is not `isLessonKey`, but its private notes and pasted images hang
+  // off its key, so it must be cleaned like a lesson. Only PDFs can carry annotations.
+  const sharedPdfs = keys.filter((k) => hasReservedSegment(k) && /\.pdf$/i.test(k));
+  const lessons = new Set([...keys.filter(isLessonKey), ...sharedPdfs, ...(await lessonKeysUnder(env, p, single))]);
   // Resource PDFs live outside the lesson keys, so deleting their lesson must take them too.
   for (const lessonKey of [...lessons]) {
     const rows = await env.DB.prepare('SELECT file_key FROM resources WHERE lesson = ? AND file_key IS NOT NULL').bind(lessonKey).all();
