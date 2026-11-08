@@ -94,7 +94,7 @@ app-root{display:flex;flex-direction:column;min-height:100vh}
    fills the viewport exactly. */
 app-root.no-head{--head:0px}
 header{display:flex;align-items:center;gap:.6rem;height:var(--head);flex:none;padding:0 clamp(.75rem,2vw,1.25rem);border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:20}
-.wordmark{display:flex;flex-direction:column;justify-content:center;font-family:"LT Superior",Inter,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;font-weight:700;line-height:1.03;letter-spacing:-.01em;white-space:nowrap}
+.wordmark{display:flex;flex-direction:column;justify-content:center;font-family:"LT Superior",Inter,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:18px;font-weight:700;line-height:1.03;letter-spacing:-.01em;white-space:nowrap}
 .head-search{position:relative;display:flex;align-items:center;gap:.4rem;flex:1;min-width:0;max-width:520px;margin:0 auto}
 .head-field{display:flex;align-items:center;gap:.4rem;flex:1;min-width:0;height:30px;padding:0 .3rem 0 .55rem;border:1px solid var(--border);border-radius:var(--r-surface);background:var(--bg);transition:border-color .12s}
 .head-field:focus-within{border-color:var(--primary)}
@@ -536,7 +536,7 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
 /* ===== Responsive ===== */
 @media(max-width:760px){
   :root{--row-h:44px}
-  .wordmark{font-size:14px}
+  .wordmark{font-size:16px}
   .head-search{flex:0 0 auto;margin:0 .3rem 0 auto;max-width:none}
   .head-field{display:none}
   .head-toggle{display:grid}
