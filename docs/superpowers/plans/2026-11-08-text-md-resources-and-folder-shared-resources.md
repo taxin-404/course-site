@@ -370,7 +370,7 @@ const FILES = {
   'Course/Module 01/Sub/01 - Intro.mp4': new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]),
   'Course/Module 02/02 - Setup.mp4': new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]),
   'Course/Module 01/guide.md': '# Guide\n\nRead me.',   // ordinary (non-shared) lesson file
-  'Course/RESOURCE/extra.txt': 'extra',                 // used by the within-RESOURCE move test
+  'Course/not-resources/local.txt': 'local',            // must NOT be treated as shared (F2)
   'Course/not-resources/guide.pdf': '%PDF-1.4\nnope',
 };
 ```
@@ -392,9 +392,13 @@ test('a sibling module inherits only the course-level RESOURCE folder', async ()
   assert.deepEqual(shared.map((r) => r.title), ['syllabus']);
 });
 
-test('a folder named not-resources shares nothing', async () => {
+test('a folder named not-resources is not a RESOURCE folder (F2)', async () => {
   const res = await call('/api/lesson/Course%2Fnot-resources%2Fguide.pdf/resources', { headers: { cookie } });
-  assert.deepEqual((await res.json()).resources, []);
+  const shared = (await res.json()).resources.filter((r) => r.shared);
+  // The lesson sits under Course, so it correctly inherits the course-level RESOURCE file.
+  // The point: `not-resources` itself is NOT a RESOURCE folder, so nothing from it (local.txt,
+  // guide.pdf) is shared and no row carries scope `not-resources`.
+  assert.deepEqual(shared.map((r) => [r.title, r.kind, r.scope]), [['syllabus', 'pdf', 'Course']]);
 });
 ```
 
@@ -476,18 +480,21 @@ test('a YouTube lesson cannot be created under RESOURCE', async () => {
 });
 
 test('moving an entry into RESOURCE is refused, but editing within RESOURCE is allowed', async () => {
-  const into = await call('/api/admin/files/move', {
+  const move = (from, to) => call('/api/admin/files/move', {
     method: 'POST',
     headers: { cookie: adminCookie, origin: ORIGIN, 'content-type': 'application/json' },
-    body: JSON.stringify({ from: 'Course/Module 01/guide.md', to: 'Course/Module 01/RESOURCE/guide.md', kind: 'file' }),
+    body: JSON.stringify({ from, to }),
   });
-  assert.equal(into.status, 400);
-  const within = await call('/api/admin/files/move', {
-    method: 'POST',
-    headers: { cookie: adminCookie, origin: ORIGIN, 'content-type': 'application/json' },
-    body: JSON.stringify({ from: 'Course/RESOURCE/extra.txt', to: 'Course/RESOURCE/extra-v2.txt', kind: 'file' }),
-  });
-  assert.equal(within.status, 200);
+  // A lesson file moved into RESOURCE is refused (today by the "must stay a lesson" guard).
+  assert.equal((await move('Course/Module 01/guide.md', 'Course/Module 01/RESOURCE/guide.md')).status, 400);
+  // F8: a whole section moved into RESOURCE must also be refused by the new reserved-name rule.
+  // A folder move skips the lesson guard, so this case genuinely exercises the new guard (and is
+  // the real RED: it succeeds today).
+  assert.equal((await move('Course/Module 02', 'Course/RESOURCE/Module 02')).status, 400);
+  // F7: seed a file inside RESOURCE at test time (the fake R2 bucket has put()) so Task 5's
+  // per-scope ordering assertions are not polluted by a second course-level file.
+  await env.RESOURCES.put('Course/RESOURCE/extra.txt', 'extra');
+  assert.equal((await move('Course/RESOURCE/extra.txt', 'Course/RESOURCE/extra-v2.txt')).status, 200);
 });
 ```
 
