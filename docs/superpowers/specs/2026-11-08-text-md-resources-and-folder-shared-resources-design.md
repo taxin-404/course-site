@@ -128,7 +128,11 @@ Order: the lesson's own resources first (by `created`), then shared ones **neare
 - `worker/files.js` move/rename refuses a destination that contains a `RESOURCE` segment, unless the source is already under `RESOURCE` (editing shared files in place stays allowed). This closes the folder-rename/move hole the `isLessonKey` single-file guard already covers for files.
 - Deleting a `RESOURCE` folder is allowed (the owner's explicit action); it just removes shared files.
 
-**Frontend (`lesson-resources.ts`).** A `shared` row is read-only: no pencil/trash (those live in Admin → Files), a small "Shared" tag with its `scope`, and open behaviour by kind. A **shared PDF opens in the same in-app reader but with the notes controls hidden** — sharing is anonymous and not a per-lesson document, so it carries no `pdf_notes` and the server must not have to authorize annotations on it. Text rows open in the text viewer. The `count` emitted to the panel includes shared rows.
+**Frontend (`lesson-resources.ts`).** A `shared` row is read-only for its *metadata*: no pencil/trash (those live in Admin → Files), a small "Shared" tag with its `scope`. Open behaviour by kind: a shared **PDF opens in the full in-app reader with its notes controls**, exactly like a lesson PDF (see the notes guard below); text rows open in the text viewer (view-only). The `count` emitted to the panel includes shared rows.
+
+**Annotations on shared PDFs.** Every PDF is annotatable — lesson PDFs, uploaded resource PDFs, and shared `RESOURCE` PDFs. `pdf_notes` and `note_assets` are keyed by the file path, so a shared PDF's annotations are one document for every lesson that inherits it. Two guards widen to allow it:
+- `/api/notes/<key>` and `/api/note-asset/<key>/<id>` accept a `.pdf` key that is (a) under a `RESOURCE` segment, (b) a real object (`env.RESOURCES.head(key)`), and (c) in a course the caller is enrolled in (or the caller is an admin) — alongside the existing lesson and resource-`file_key` checks. The existence check stops a student inventing `.../RESOURCE/anything.pdf` to fill D1.
+- `worker/files.js` move/rename of a `RESOURCE` PDF carries its `pdf_notes` and `note_assets` (same as a lesson key), and deleting one removes them, so a shared file's annotations never orphan. Text shared files carry no notes.
 
 ## 8. Security review
 
@@ -141,7 +145,7 @@ Order: the lesson's own resources first (by `created`), then shared ones **neare
 
 - `src/app/markdown.test.mjs`: escaping (`<script>` becomes text), headings, lists, code fences, links (and a `javascript:` link is dropped), bold/italic, paragraphs.
 - `worker/resources.test.mjs` (new or extended): upload `.txt`/`.md` (kind + key extension), reject an oversized text and a NUL-containing "text", the legacy `/pdf` path still works, `GET` returns the real kind, `PATCH` ignores a URL for a file kind, `DELETE` removes the object.
-- `worker/shared-resources.test.mjs` (new): a `RESOURCE` file is shared with a lesson in its scope and a nested one; a `RESOURCE` folder is not listed as a lesson/section; a file under `RESOURCE` is `isLessonKey === false`; nearest-scope ordering; a non-`RESOURCE` folder with the same files shares nothing; `POST /api/admin/youtube` under a `RESOURCE` folder is refused; a folder move/rename into `RESOURCE` is refused; `/api/notes` on a shared PDF key is refused (view-only).
+- `worker/shared-resources.test.mjs` (new): a `RESOURCE` file is shared with a lesson in its scope and a nested one; a `RESOURCE` folder is not listed as a lesson/section; a file under `RESOURCE` is `isLessonKey === false`; nearest-scope ordering; a non-`RESOURCE` folder with the same files shares nothing; `POST /api/admin/youtube` under a `RESOURCE` folder is refused; a folder move/rename into `RESOURCE` is refused; `/api/notes` round-trips on a real shared PDF key but is refused for an invented `.../RESOURCE/x.pdf`, and `files.js` carries/deletes its `pdf_notes` on move/delete.
 - Update existing tests that assert the old kind unions/`isLessonKey` behaviour.
 - `npm test`, `npm run typecheck`, `npm run build`, `npm run check:scripts`.
 - Live pass on `dev`: upload each of the four kinds on a video lesson; open a `.md` lesson; confirm the panel on a PDF lesson; drop a file in a module `RESOURCE` folder and confirm it appears on every lesson in that module and its subfolders.
@@ -157,8 +161,8 @@ Order: the lesson's own resources first (by `created`), then shared ones **neare
 - TXT/MD resource cap is **2 MB**; PDF stays 25 MB.
 - Text lessons use kind `'txt'` / `'md'` (not a single `'text'`), so icons/labels/viewers pick the right one without re-parsing the id.
 - The legacy `…/resources/pdf` route is kept as an alias for cached clients; the SPA uses `…/resources/file`.
-- Shared resources are read-only in the lesson panel (managed in Admin → Files) and carry no note/order.
-- Shared PDF resources are **view-only**: the resource modal hides the notes controls, and the shared file gets no `pdf_notes`/`note_assets`, so the server never has to authorize annotations on a shared prefix.
+- Shared resources are read-only for metadata in the lesson panel (managed in Admin → Files) and carry no note/order.
+- **Every PDF is annotatable**, including shared `RESOURCE` PDFs. txt/md are view-only (no notes). Shared PDF annotations are keyed by the file, so they are shared across the lessons that inherit it.
 - `.markdown` is treated as `md` everywhere (resources, lessons, serving).
 - `RESOURCE` is enforced on writes: no YouTube lesson or lesson-bearing file/folder may be moved or created under it.
 - Shared ordering is nearest-scope-first; own resources always first.
