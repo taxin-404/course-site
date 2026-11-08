@@ -1,4 +1,4 @@
-import { handleFiles, LESSON_ROWS } from './files.js';
+import { handleFiles, hasReservedSegment, LESSON_ROWS } from './files.js';
 import { BANNER_TYPES, bannerKeys } from './banners.js';
 import { lessonOf, hourBucket, publicLesson, pace } from './limits.js';
 import { sessionKey, scramble } from './yt-cipher.mjs';
@@ -381,7 +381,7 @@ function displayName(id) {
 //   <Course>/<Section>/<file>        → course with a section containing a lesson
 //   <Course>/<Section>/<Sub>/...     → deeper sub-folders treated as nested sections
 const VIDEO_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|m3u8)$/i;
-const MEDIA_TYPES = { m3u8: 'application/vnd.apple.mpegurl', ts: 'video/mp2t', vtt: 'text/vtt', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', m4v: 'video/mp4' };
+const MEDIA_TYPES = { m3u8: 'application/vnd.apple.mpegurl', ts: 'video/mp2t', vtt: 'text/vtt', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', m4v: 'video/mp4', txt: 'text/plain; charset=utf-8', md: 'text/markdown; charset=utf-8', markdown: 'text/markdown; charset=utf-8' };
 let cache = { at: 0, data: null };
 // Called after any admin file change so the site reflects it immediately instead of
 // waiting out the 60 s window below.
@@ -420,6 +420,8 @@ async function listCourse(env) {
   const courses = new Map();
   for (const key of keys) {
     if (key === '_notes' || key.startsWith('_notes/')) continue; // reserved: private note images
+    // A shared RESOURCE file is never a lesson and must not register its course either.
+    if (hasReservedSegment(key)) continue;
     // A course is a top-level folder. Register it for any nested key, so a folder that
     // holds only its `.keep` placeholder (a brand-new, empty course) is listed too.
     const slash = key.indexOf('/');
@@ -429,8 +431,8 @@ async function listCourse(env) {
     }
     if (/\.ts$/i.test(key)) continue; // skip HLS segments
     if (key.split('/').includes('_resources')) continue; // resource PDFs are not lessons
-    const pdf = /\.pdf$/i.test(key), video = VIDEO_EXT.test(key);
-    if (!pdf && !video) continue;
+    const pdf = /\.pdf$/i.test(key), video = VIDEO_EXT.test(key), text = /\.(txt|md|markdown)$/i.test(key);
+    if (!pdf && !video && !text) continue;
     const parts = key.split('/');
     if (parts.length < 2) continue; // skip root-level files with no course folder
     const courseName = parts[0];
@@ -442,7 +444,8 @@ async function listCourse(env) {
     if (!courses.has(courseName)) courses.set(courseName, new Map());
     const secs = courses.get(courseName);
     if (!secs.has(sectionName)) secs.set(sectionName, []);
-    const lesson = { id: key, title, kind: pdf ? 'pdf' : 'video' };
+    const kind = pdf ? 'pdf' : video ? 'video' : /\.(md|markdown)$/i.test(key) ? 'md' : 'txt';
+    const lesson = { id: key, title, kind };
     if (file === 'index.m3u8') {
       const subs = subtitleMap.get(key.slice(0, key.lastIndexOf('/')));
       if (subs) lesson.subtitles = subs.sort((a, b) => NUM.compare(a.lang, b.lang) || NUM.compare(a.key, b.key));
@@ -463,6 +466,7 @@ async function listCourse(env) {
     const parts = String(row.id).split('/').map((s) => s.trim()).filter(Boolean);
     if (parts.length < 2 || !row.yt) continue;
     const id = parts.join('/');
+    if (hasReservedSegment(id)) continue; // shared RESOURCE files are never lessons
     const courseName = parts[0];
     if (!courses.has(courseName)) courses.set(courseName, new Map());
     const secs = courses.get(courseName);
@@ -891,7 +895,7 @@ async function sweepPrefix(env, prefix) {
 
 async function serve(req, env, key, u) {
   const isPdf = /\.pdf$/i.test(key);
-  const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v|vtt)$/i.test(key);
+  const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v|vtt|txt|md|markdown)$/i.test(key);
   if (!ok || !mediaRequestOk(req, env)) return json({ error: 'Not allowed' }, 403);
   if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
   const isVideo = VIDEO_FILE.test(key);
