@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Changed (locked course cards show their lesson count)
+- **A course a student has not been granted now shows how many lessons it holds** — `0/23 lessons` instead of `0/0`. The card still stays disabled ("No access") and the lessons themselves are still withheld, so nothing leaks beyond a number. `GET /api/course` now includes a course-level `lessonCount` (the total across all sections, YouTube lessons included); `CourseData` gained `lessonCount?`, and `courseTotal()` in `src/app/course.ts` falls back to it when `sections` is empty, which is exactly the locked case. Covered by `worker/security.test.mjs` (a locked course keeps `sections: []` but reports `lessonCount`, and an open course's count matches the lessons it lists) — `npm test` 115/115, `typecheck`, `build`, `check:scripts`.
+
 ### Added (rename YouTube lessons)
 - **A YouTube lesson can now be renamed from Admin panel → Files.** The pencil on a YouTube row was "Change link"; it is now "Edit lesson" and the dialog shows the lesson name, so a rename is possible. Because a YouTube lesson's name is its key, `POST /api/admin/youtube/rename` (`{id, name}`) moves the `youtube_lessons` row and carries every row keyed by the old path — `comments`, `video_notes`, `pdf_notes`, `note_assets`, `watched`, `resources` and `content_order` — so notes, comments, progress and saved order survive. It refuses to land on another lesson or a real R2 file (`409`), rejects an empty name or one containing `/` (`400`), answers `404` for a missing lesson, and is a no-op when the name is unchanged. The video id and creation time are preserved. Covered by `worker/youtube-rename.test.mjs` (move + all student data, course listing, conflicts, validation, no-op, admin-only) — `npm test` 114/114, `typecheck`, `build`, `check:scripts`.
 
