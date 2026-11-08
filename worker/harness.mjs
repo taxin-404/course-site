@@ -165,6 +165,7 @@ export function rate() {
     let obj = objects.get(id);
     if (!obj) {
       const raw = new DatabaseSync(':memory:');
+      obj = { raw, alarmAt: null, limiter: null };
       const ctx = {
         storage: {
           sql: {
@@ -178,9 +179,16 @@ export function rate() {
               return { toArray: () => [], one: () => undefined };
             },
           },
+          async getAlarm() { return obj.alarmAt; },
+          async setAlarm(at) { obj.alarmAt = Number(at); },
+          async deleteAlarm() { obj.alarmAt = null; },
+          async deleteAll() {
+            raw.exec('DROP TABLE IF EXISTS login');
+            raw.exec('DROP TABLE IF EXISTS hits');
+          },
         },
       };
-      obj = { raw, limiter: new RateLimiter(ctx, {}) };
+      obj.limiter = new RateLimiter(ctx, {});
       objects.set(id, obj);
       stats.objects++;
     }
@@ -200,7 +208,12 @@ export function rate() {
       };
     },
   };
-  return { RATE, stats, raw: (id) => objects.get(id)?.raw };
+  return {
+    RATE, stats,
+    raw: (id) => objects.get(id)?.raw,
+    alarm: (id) => objectFor(id).limiter.alarm(),
+    alarmAt: (id) => objects.get(id)?.alarmAt ?? null,
+  };
 }
 
 /** PBKDF2 hash exactly as the Worker stores it (`salt.hash`, base64url), for seeding users. */
