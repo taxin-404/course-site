@@ -25,3 +25,13 @@ test('markdown links allow only http/https and set rel/target', () => {
   assert.ok(!bad.includes('href') && !bad.includes('<a '));
   assert.match(bad, /\[x\]\(javascript:alert\(1\)\)/);
 });
+
+test('markdown link hrefs are not corrupted by emphasis', () => {
+  for (const url of ['https://e.com/_foo_', 'https://e.com/_foo_bar_', 'https://e.com/*foo*', 'https://e.com/__foo__']) {
+    const out = renderMarkdown(`[x](${url})`);
+    const href = /href="([^"]*)"/.exec(out);
+    assert.ok(href, `no href for ${url}`);
+    assert.equal(href[1], url);
+    assert.ok(!out.includes('<em>') && !out.includes('<strong>'), `emphasis leaked into ${url}: ${out}`);
+  }
+});

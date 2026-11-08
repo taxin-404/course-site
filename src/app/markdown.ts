@@ -16,18 +16,37 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Apply links and emphasis to a run of text that contains no inline code. */
-function renderText(text: string): string {
-  let out = text.replace(/\[([^\]]*)\]\(([^)\s]*)\)/g, (match, label: string, url: string) => {
-    if (!/^https?:\/\//i.test(url)) return match;
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
-  });
-  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+/** Apply bold and italic/underscore emphasis to a run of plain text. */
+function applyEmphasis(text: string): string {
+  let out = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   out = out.replace(/__([^_]+)__/g, '<strong>$1</strong>');
   out = out.replace(/\*([^*]+)\*/g, '<em>$1</em>');
   // Require word boundaries so intraword underscores (snake_case) stay literal.
   out = out.replace(/(^|[^\w_])_([^_\s][^_]*?)_(?=$|[^\w_])/g, '$1<em>$2</em>');
   return out;
+}
+
+/**
+ * Apply links and emphasis to a run of text that contains no inline code.
+ * Link spans are split out first and their `href` is never emphasised, so a URL
+ * containing `_x_`, `*x*` or `__x__` is emitted verbatim.
+ */
+function renderText(text: string): string {
+  const linkRe = /\[([^\]]*)\]\(([^)\s]*)\)/g;
+  let out = '';
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = linkRe.exec(text)) !== null) {
+    out += applyEmphasis(text.slice(last, match.index));
+    const [, label, url] = match;
+    if (/^https?:\/\//i.test(url)) {
+      out += `<a href="${url}" target="_blank" rel="noopener noreferrer">${applyEmphasis(label)}</a>`;
+    } else {
+      out += applyEmphasis(match[0]);
+    }
+    last = linkRe.lastIndex;
+  }
+  return out + applyEmphasis(text.slice(last));
 }
 
 /** Render one line's inline content. Splitting on backticks protects code from emphasis. */
