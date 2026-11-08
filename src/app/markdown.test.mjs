@@ -35,3 +35,10 @@ test('markdown link hrefs are not corrupted by emphasis', () => {
     assert.ok(!out.includes('<em>') && !out.includes('<strong>'), `emphasis leaked into ${url}: ${out}`);
   }
 });
+
+test('markdown emphasis can span a link', () => {
+  const bold = renderMarkdown('**[docs](https://e.com)**');
+  assert.match(bold, /<strong><a href="https:\/\/e\.com" target="_blank" rel="noopener noreferrer">docs<\/a><\/strong>/);
+  const italic = renderMarkdown('*see [the docs](https://e.com)*');
+  assert.match(italic, /<em>see <a href="https:\/\/e\.com" target="_blank" rel="noopener noreferrer">the docs<\/a><\/em>/);
+});

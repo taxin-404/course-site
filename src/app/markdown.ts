@@ -26,27 +26,33 @@ function applyEmphasis(text: string): string {
   return out;
 }
 
+/** A marker (one or more NUL bytes) that does not occur in `text`, used to shield links. */
+function uniqueMarker(text: string): string {
+  let marker = '\u0000';
+  while (text.includes(marker)) marker += '\u0000';
+  return marker;
+}
+
 /**
  * Apply links and emphasis to a run of text that contains no inline code.
- * Link spans are split out first and their `href` is never emphasised, so a URL
- * containing `_x_`, `*x*` or `__x__` is emitted verbatim.
+ * Each link is replaced by an opaque marker before the emphasis passes run, so
+ * emphasis can span a link (`**[text](url)**`) while the passes never reach the
+ * link's `href`; the rendered anchors are substituted back afterwards.
  */
 function renderText(text: string): string {
+  const links: string[] = [];
+  const marker = uniqueMarker(text);
   const linkRe = /\[([^\]]*)\]\(([^)\s]*)\)/g;
-  let out = '';
-  let last = 0;
-  let match: RegExpExecArray | null;
-  while ((match = linkRe.exec(text)) !== null) {
-    out += applyEmphasis(text.slice(last, match.index));
-    const [, label, url] = match;
-    if (/^https?:\/\//i.test(url)) {
-      out += `<a href="${url}" target="_blank" rel="noopener noreferrer">${applyEmphasis(label)}</a>`;
-    } else {
-      out += applyEmphasis(match[0]);
-    }
-    last = linkRe.lastIndex;
-  }
-  return out + applyEmphasis(text.slice(last));
+  const withMarkers = text.replace(linkRe, (match, label: string, url: string) => {
+    links.push(
+      /^https?:\/\//i.test(url)
+        ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${applyEmphasis(label)}</a>`
+        : applyEmphasis(match),
+    );
+    return `${marker}${links.length - 1}${marker}`;
+  });
+  const tokenRe = new RegExp(`${marker}(\\d+)${marker}`, 'g');
+  return applyEmphasis(withMarkers).replace(tokenRe, (_all, index: string) => links[Number(index)]);
 }
 
 /** Render one line's inline content. Splitting on backticks protects code from emphasis. */
