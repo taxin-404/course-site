@@ -1,4 +1,5 @@
 import { handleFiles } from './files.js';
+import { BANNER_TYPES, bannerKeys } from './banners.js';
 import { lessonOf, hourBucket, publicLesson, pace } from './limits.js';
 import { sessionKey, scramble } from './yt-cipher.mjs';
 import { YOUTUBE_LESSONS } from './youtube.js';
@@ -315,6 +316,8 @@ async function listCourse(env) {
     keys.push(...r.objects.map((o) => o.key)); cursor = r.truncated ? r.cursor : undefined;
   } while (cursor);
 
+  const banners = bannerKeys(keys);
+
   // Sidecar subtitles: <Lesson>/index.<lang>[.<n>].vtt belongs to that folder's HLS lesson.
   const subtitleMap = new Map();
   for (const key of keys) {
@@ -409,7 +412,7 @@ async function listCourse(env) {
         title: sectionName || null,
         lessons: lessons.sort((a, b) => ordered(a.id, a.title, b.id, b.title)),
       }));
-    return { title: courseName, description: descriptions.get(courseName) || '', sections };
+    return { title: courseName, description: descriptions.get(courseName) || '', banner: banners.get(courseName) || '', sections };
   });
   cache = { at: Date.now(), data };
   return data;
@@ -788,6 +791,7 @@ const handle = async (req, env) => {
           return {
             title: c.title,
             description: c.description || '',
+            banner: c.banner ? `/api/banner/${encodeURIComponent(c.title)}` : '',
             locked,
             sections: locked ? [] : c.sections.map((s) => ({
               title: s.title,
@@ -825,6 +829,23 @@ const handle = async (req, env) => {
           if (!mine || mine.has(key.split('/')[0]) || courseLevel) order[key] = Number(row.position);
         }
         return json(order);
+      }
+      if (path.startsWith('/api/banner/')) {
+        const course = decodeURIComponent(path.slice('/api/banner/'.length));
+        const c = (await listCourse(env)).find((x) => x.title === course);
+        const ext = c && c.banner ? c.banner.split('.').pop().toLowerCase() : '';
+        if (!ext || !BANNER_TYPES[ext]) return json({ error: 'Not found' }, 404);
+        const obj = await env.RESOURCES.get(c.banner);
+        if (!obj) return json({ error: 'Not found' }, 404);
+        const h = new Headers();
+        h.set('content-type', BANNER_TYPES[ext]);
+        h.set('cache-control', 'private, no-store');
+        h.set('x-content-type-options', 'nosniff');
+        h.set('content-disposition', 'inline');
+        h.set('cross-origin-resource-policy', 'same-origin');
+        h.set('x-robots-tag', 'noindex');
+        h.set('content-length', String(obj.size));
+        return new Response(obj.body, { headers: h });
       }
       if (path.startsWith('/api/media/')) {
         const key = decodeURIComponent(path.slice(11));
