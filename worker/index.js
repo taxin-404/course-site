@@ -844,6 +844,9 @@ const handle = async (req, env) => {
         h.set('content-disposition', 'inline');
         h.set('cross-origin-resource-policy', 'same-origin');
         h.set('x-robots-tag', 'noindex');
+        // An SVG can carry script. In an <img> it never runs, but a direct visit
+        // would open it as a same-origin document, so lock it down there too.
+        if (ext === 'svg') h.set('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox");
         h.set('content-length', String(obj.size));
         return new Response(obj.body, { headers: h });
       }

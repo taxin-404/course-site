@@ -23,6 +23,7 @@ const FILES = {
   'Course/paced.pdf': new Uint8Array(520000), // just over a 5-second burst at 0.8 Mbps
   'Course/deleteme.pdf': '%PDF-1.4\nThrowaway lesson', // lesson delete removes its note images
   'Other/hidden.pdf': '%PDF-1.4\nOther course',
+  'Other/banner.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><script>alert(1)</script></svg>',
 };
 
 const { raw, DB } = db();
@@ -333,6 +334,23 @@ test('/api/progress only accepts a real lesson in a course the student has', asy
   assert.equal((await send('Course/missing.pdf')).status, 404, 'unknown lesson');
   assert.equal((await send('Other/hidden.pdf')).status, 403, 'known lesson, unenrolled course');
   assert.equal((await send('Course/notes.pdf')).status, 200, 'known lesson in an enrolled course');
+});
+
+test('a course banner is served to any signed-in user, and SVG cannot run script', async () => {
+  const email = await addUser(); // deliberately not enrolled in Other
+  const { cookie } = await login(email);
+  invalidateCourse();
+
+  const svg = await call('/api/banner/Other', { headers: browser(cookie) });
+  assert.equal(svg.status, 200, 'a signed-in outsider still gets the card banner');
+  assert.equal(svg.headers.get('content-type'), 'image/svg+xml');
+  assert.equal(svg.headers.get('cache-control'), 'private, no-store');
+  const csp = svg.headers.get('content-security-policy') || '';
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /sandbox/);
+  assert.match(await svg.text(), /<svg/);
+
+  assert.equal((await call('/api/banner/Course', { headers: browser(cookie) })).status, 404, 'no banner file');
 });
 
 test('YouTube ids are fetched per lesson and never appear in /api/course', async () => {

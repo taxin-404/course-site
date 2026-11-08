@@ -1,13 +1,14 @@
 // Course banners are a named file at the course root; this module is the one
 // place that decides what counts as one and which file wins when several exist.
 
-const BANNER_EXTS = ['jpg', 'jpeg', 'png', 'webp'];
+const BANNER_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'svg'];
 
 export const BANNER_TYPES = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
+  svg: 'image/svg+xml',
 };
 
 /** The extension of a course banner key, or null. Only <course>/banner.<ext>. */

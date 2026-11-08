@@ -33,8 +33,8 @@ interface Toast { id: number; text: string; bad: boolean }
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Mirrors worker/banners.js; this copy only labels the row. */
-const BANNER_FILE = /^[^/]+\/banner\.(jpe?g|png|webp)$/i;
-const IMAGE_FILE = /\.(jpe?g|png|webp|gif)$/i;
+const BANNER_FILE = /^[^/]+\/banner\.(jpe?g|png|webp|svg)$/i;
+const IMAGE_FILE = /\.(jpe?g|png|webp|gif|svg)$/i;
 
 @Component({
   selector: 'app-admin-files',
@@ -86,7 +86,7 @@ const IMAGE_FILE = /\.(jpe?g|png|webp|gif)$/i;
       @if (error()) { <p class="files-error">{{ error() }}</p> }
 
       @if (path() && !path().includes('/')) {
-        <p class="files-note">Card banner: upload banner.jpg, banner.jpeg, banner.png or banner.webp to this folder (landscape, about 16:9).</p>
+        <p class="files-note">Card banner: upload banner.jpg, banner.jpeg, banner.png, banner.webp or banner.svg to this folder (landscape, about 16:9).</p>
       }
 
       @if (uploader.jobs().length) {
