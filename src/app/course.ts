@@ -143,20 +143,25 @@ type View = CourseView;
             <h1 class="page-title">Courses</h1>
             @for (c of courseCards(); track c.title) {
               <button class="course-card" [disabled]="c.locked" (click)="openCourse(c)">
-                <span class="card-head">
-                  <span class="row-glyph" aria-hidden="true">
-                    <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" /><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20" /></svg>
+                @if (c.banner) {
+                  <img class="card-banner" [src]="c.banner" alt="" loading="lazy" decoding="async" />
+                }
+                <span class="card-body">
+                  <span class="card-head">
+                    <span class="row-glyph" aria-hidden="true">
+                      <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" /><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20" /></svg>
+                    </span>
+                    <span class="card-title">{{ c.title }}</span>
                   </span>
-                  <span class="card-title">{{ c.title }}</span>
-                </span>
-                @if (c.description) { <span class="card-desc">{{ c.description }}</span> }
-                <span class="card-foot">
-                  @if (courseTotal(c)) {
-                    <span class="course-bar" aria-hidden="true"><i [style.width.%]="coursePercent(c)"></i></span>
-                  }
-                  <span class="card-meta-row">
-                    <span class="row-meta">{{ courseDone(c) }}/{{ courseTotal(c) }} lessons</span>
-                    <span class="card-cta">{{ c.locked ? 'No access' : (courseDone(c) ? 'Continue' : 'Start') }}</span>
+                  @if (c.description) { <span class="card-desc">{{ c.description }}</span> }
+                  <span class="card-foot">
+                    @if (courseTotal(c)) {
+                      <span class="course-bar" aria-hidden="true"><i [style.width.%]="coursePercent(c)"></i></span>
+                    }
+                    <span class="card-meta-row">
+                      <span class="row-meta">{{ courseDone(c) }}/{{ courseTotal(c) }} lessons</span>
+                      <span class="card-cta">{{ c.locked ? 'No access' : (courseDone(c) ? 'Continue' : 'Start') }}</span>
+                    </span>
                   </span>
                 </span>
               </button>

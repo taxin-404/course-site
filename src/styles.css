@@ -151,13 +151,15 @@ main{overflow:hidden;display:flex;flex-direction:column}
 main:has(.list){overflow-y:auto;padding:1.4rem clamp(1rem,3vw,2rem)}
 .list{display:flex;flex-direction:column;max-width:900px;margin:0 auto;width:100%}
 .list .page-title{margin-bottom:.6rem}
-.list.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:1.1rem;max-width:1240px;align-content:start}
+.list.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.1rem;max-width:1240px;align-content:start}
 .cards .page-title{grid-column:1/-1;margin-bottom:.4rem}
 .cards .empty{grid-column:1/-1}
 /* align-items:stretch is required: the global button reset (line ~40) sets align-items:center,
    which would shrink-wrap and centre every child of this column-flex card. */
-.course-card{display:flex;flex-direction:column;align-items:stretch;min-width:0;gap:.8rem;min-height:186px;padding:1.25rem 1.4rem;width:100%;text-align:left;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:12px;transition:border-color .12s,background .12s}
+.course-card{display:flex;flex-direction:column;align-items:stretch;min-width:0;gap:0;min-height:186px;padding:0;overflow:hidden;width:100%;text-align:left;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:12px;transition:border-color .12s,background .12s}
 .course-card:hover:not(:disabled),.course-card:focus-visible{background:var(--hover);border-color:var(--primary)}
+.course-card .card-banner{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--hover)}
+.course-card .card-body{display:flex;flex-direction:column;gap:.8rem;flex:1;min-width:0;padding:1.25rem 1.4rem}
 .course-card .card-head{display:flex;align-items:center;gap:.7rem}
 .course-card .row-glyph{width:20px;height:20px}
 .course-card .row-glyph svg{width:20px;height:20px;stroke-width:1.7}

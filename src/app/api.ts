@@ -3,7 +3,7 @@ import { Injectable, signal } from '@angular/core';
 export interface Subtitle { key: string; lang: string }
 export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'youtube'; done: boolean; subtitles?: Subtitle[] }
 export interface Section { title: string | null; lessons: Lesson[] }
-export interface CourseData { title: string; description: string; locked?: boolean; sections: Section[] }
+export interface CourseData { title: string; description: string; banner?: string; locked?: boolean; sections: Section[] }
 export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number; courses: string[] }
 export interface YoutubeLesson { id: string; course: string; folder: string; lesson: string; yt: string }
 export interface BulkResult { added: { email: string; password?: string }[]; skipped: { email: string; reason: string }[] }
