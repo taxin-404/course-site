@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Added (bulk course access)
+- **The Users view bulk bar has an "Access" button.** Select any number of students, click **Access**, tick one or more courses, and choose **Give access** or **Remove access**; it applies to every selected student at once. A give adds each course without touching the rest (useful for opening a new course to a batch, or free access for a limited time), and a remove takes it back; removals keep notes and progress, so giving it back restores them. Admins and the Owner are skipped (they already see every course), and if the course filter has exactly one course ticked it is pre-selected. It reuses the existing per-user access route — **no Worker change** — computing each student's next list from the one they have (`applyCourseAccess` in `src/app/course-access.ts`: a give is a union, a remove a difference), so a bulk action can never wipe a course granted elsewhere. Covered by `src/app/course-access.test.mjs`; same busy → reload → toast behaviour as Make admin / Delete. No expiry dates by design (manual remove covers the limited-time case). `npm test` 118/118, `typecheck`, `build`, `check:scripts`.
+
 ### Changed (locked course cards show their lesson count)
 - **A course a student has not been granted now shows how many lessons it holds** — `0/23 lessons` instead of `0/0`. The card still stays disabled ("No access") and the lessons themselves are still withheld, so nothing leaks beyond a number. `GET /api/course` now includes a course-level `lessonCount` (the total across all sections, YouTube lessons included); `CourseData` gained `lessonCount?`, and `courseTotal()` in `src/app/course.ts` falls back to it when `sections` is empty, which is exactly the locked case. Covered by `worker/security.test.mjs` (a locked course keeps `sections: []` but reports `lessonCount`, and an open course's count matches the lessons it lists) — `npm test` 115/115, `typecheck`, `build`, `check:scripts`.
 
