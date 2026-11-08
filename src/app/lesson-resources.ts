@@ -338,7 +338,7 @@ export class LessonResources {
     if (file.size > 25 * 1024 * 1024) { this.error.set('PDFs must be 25 MB or smaller.'); return; }
     this.saving.set(true);
     try {
-      await this.api.uploadResourcePdf(this.lesson().id, file, this.title().trim() || undefined, this.note().trim() || undefined);
+      await this.api.uploadResourceFile(this.lesson().id, file, this.title().trim() || undefined, this.note().trim() || undefined);
       this.title.set('');
       this.note.set('');
       this.file.set(null);
@@ -355,7 +355,7 @@ export class LessonResources {
   protected async remove(r: ResourceItem): Promise<void> {
     if (!confirm(`Remove “${r.title}” from this lesson?`)) return;
     try {
-      await this.api.deleteResource(r.id);
+      await this.api.deleteResource(Number(r.id));
       await this.load();
     } catch {
       this.error.set('Could not remove that resource.');
@@ -383,7 +383,7 @@ export class LessonResources {
     this.editError.set('');
     this.editBusy.set(true);
     try {
-      await this.api.updateResource(r.id, {
+      await this.api.updateResource(Number(r.id), {
         title: this.editTitle().trim(),
         ...(r.kind === 'link' ? { url: this.editUrl().trim() } : {}),
         note: this.editNote().trim(),

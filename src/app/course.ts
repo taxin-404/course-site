@@ -250,7 +250,7 @@ export class Course {
     const currentPath = v.path; // e.g. [] = course root, ['Section'] = inside section
     const here = [course.title, ...currentPath].join('/');
 
-    type Row = { id: string; path: string; name: string; kind: 'video' | 'pdf' | 'youtube' | 'folder'; done: boolean; mark: StatusMark };
+    type Row = { id: string; path: string; name: string; kind: 'video' | 'pdf' | 'txt' | 'md' | 'youtube' | 'folder'; done: boolean; mark: StatusMark };
     // A folder shows up in every section below it, so key the rows by path to keep one.
     const rows = new Map<string, Row>();
 

@@ -2,7 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import { fetchWithRetry } from './api-retry';
 
 export interface Subtitle { key: string; lang: string }
-export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'youtube'; done: boolean; subtitles?: Subtitle[] }
+export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'txt' | 'md' | 'youtube'; done: boolean; subtitles?: Subtitle[] }
 export interface Section { title: string | null; lessons: Lesson[] }
 export interface CourseData { title: string; description: string; banner?: string; locked?: boolean; lessonCount?: number; sections: Section[] }
 export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number; courses: string[] }
@@ -13,7 +13,8 @@ export interface Comment {
   id: number; parent_id: number | null; body: string; created: number;
   name: string; initial: string; likes: number; liked: boolean; own: boolean; can_delete: boolean;
 }
-export interface ResourceItem { id: number; title: string; url: string; note: string | null; kind: 'link' | 'pdf' }
+export type ResourceKind = 'link' | 'pdf' | 'txt' | 'md';
+export interface ResourceItem { id: number | string; title: string; url: string; note: string | null; kind: ResourceKind; shared?: boolean; scope?: string }
 export interface DirEntry { name: string; path: string; position?: number | null }
 export interface FileEntry { key: string; name: string; size: number; modified: number; lesson: boolean; hls: boolean; position?: number | null }
 export interface FileListing { path: string; dirs: DirEntry[]; files: FileEntry[]; order: Record<string, number> }
@@ -262,12 +263,12 @@ export class Api {
   addResource(key: string, r: { title: string; url: string; note?: string }): Promise<{ resource: ResourceItem }> {
     return this.req(`admin/${this.lessonPath(key, 'resources')}`, r);
   }
-  uploadResourcePdf(key: string, file: File, title?: string, note?: string): Promise<{ resource: ResourceItem }> {
+  uploadResourceFile(key: string, file: File, title?: string, note?: string): Promise<{ resource: ResourceItem }> {
     const form = new FormData();
     form.append('file', file);
     if (title) form.append('title', title);
     if (note) form.append('note', note);
-    return this.raw(`admin/${this.lessonPath(key, 'resources')}/pdf`, { method: 'POST', body: form });
+    return this.raw(`admin/${this.lessonPath(key, 'resources')}/file`, { method: 'POST', body: form });
   }
   deleteResource(id: number): Promise<unknown> { return this.req(`admin/resources/${id}`, undefined, 'DELETE'); }
   updateResource(id: number, r: { title: string; url?: string; note?: string }): Promise<{ resource: ResourceItem }> {

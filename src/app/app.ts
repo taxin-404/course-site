@@ -9,7 +9,7 @@ import { OptionsMenu } from './options-menu';
 interface LessonHit {
   id: string;
   title: string;
-  kind: 'video' | 'pdf' | 'youtube';
+  kind: 'video' | 'pdf' | 'txt' | 'md' | 'youtube';
   course: string;
   section: string;
   path: string[];
