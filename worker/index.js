@@ -1111,6 +1111,40 @@ const handle = async (req, env) => {
         }
         {
           const mr = /^\/api\/admin\/resources\/(\d+)$/.exec(path);
+          if (mr && m === 'PATCH') {
+            const id = Number(mr[1]);
+            const row = await env.DB.prepare('SELECT lesson, kind, file_key FROM resources WHERE id = ?').bind(id).first();
+            if (!row) return json({ error: 'Not found' }, 404);
+            const access = await lessonAccess(env, u, String(row.lesson));
+            if (access !== 'ok') return accessError(access);
+            const b = await req.json().catch(() => ({}));
+            const title = String(b.title || '').trim();
+            const note = String(b.note || '').trim();
+            if (!title) return json({ error: 'Give the resource a title' }, 400);
+            if (title.length > 120) return json({ error: 'Keep the title under 120 characters' }, 400);
+            if (note.length > 300) return json({ error: 'Keep the note under 300 characters' }, 400);
+            let url = '';
+            if (row.kind !== 'pdf') {
+              url = String(b.url || '').trim();
+              if (!url || url.length > 800) return json({ error: 'Enter a link' }, 400);
+              let parsed;
+              try { parsed = new URL(url); } catch { return json({ error: 'Enter a valid http(s) link' }, 400); }
+              if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return json({ error: 'Enter a valid http(s) link' }, 400);
+              await env.DB.prepare('UPDATE resources SET title = ?, note = ?, url = ? WHERE id = ?').bind(title, note || null, url, id).run();
+            } else {
+              // A PDF's file is its file_key; a submitted url must never replace it.
+              await env.DB.prepare('UPDATE resources SET title = ?, note = ? WHERE id = ?').bind(title, note || null, id).run();
+            }
+            return json({
+              resource: {
+                id,
+                title,
+                url: row.kind === 'pdf' ? String(row.file_key || '') : url,
+                note: note || null,
+                kind: row.kind === 'pdf' ? 'pdf' : 'link',
+              },
+            });
+          }
           if (mr && m === 'DELETE') {
             const id = Number(mr[1]);
             const row = await env.DB.prepare('SELECT file_key FROM resources WHERE id = ?').bind(id).first();
