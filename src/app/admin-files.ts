@@ -86,7 +86,7 @@ const IMAGE_FILE = /\.(jpe?g|png|webp|gif)$/i;
       @if (error()) { <p class="files-error">{{ error() }}</p> }
 
       @if (path() && !path().includes('/')) {
-        <p class="files-note">Card banner: upload banner.jpg, banner.png or banner.webp to this folder (landscape, about 16:9).</p>
+        <p class="files-note">Card banner: upload banner.jpg, banner.jpeg, banner.png or banner.webp to this folder (landscape, about 16:9).</p>
       }
 
       @if (uploader.jobs().length) {
