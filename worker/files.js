@@ -15,10 +15,32 @@ const courseOf = (key) => String(key).split('/')[0];
 const json = (d, status = 200) => new Response(JSON.stringify(d), { status, headers: { 'content-type': 'application/json' } });
 const bad = (error, status = 400) => json({ error }, status);
 
-/** A lesson is a video or PDF key — the only keys that can carry comments, notes, progress. */
+/** The reserved folder whose files are shared with every lesson beneath it. */
+export const RESOURCE_DIR = 'resource';
+
+/** True when a single path segment names the reserved folder. */
+export const isReservedDir = (name) => String(name).toLowerCase() === RESOURCE_DIR;
+
+/** True when any `/`-separated segment of a key is the reserved folder. */
+export const hasReservedSegment = (key) => String(key).split('/').some(isReservedDir);
+
+/** A key's ancestor folder prefixes, nearest first and excluding the file name. */
+export function ancestorScopes(key) {
+  const parts = String(key).split('/');
+  parts.pop(); // drop the file name
+  const out = [];
+  while (parts.length) {
+    out.push(parts.join('/'));
+    parts.pop();
+  }
+  return out;
+}
+
+/** A lesson is a video, PDF, text or Markdown key — the only keys that can carry comments, notes, progress. */
 export function isLessonKey(key) {
+  if (hasReservedSegment(key)) return false; // shared RESOURCE files are never lessons
   if (/\.ts$/i.test(key)) return false; // HLS segments belong to their index.m3u8
-  return /\.pdf$/i.test(key) || VIDEO_EXT.test(key);
+  return /\.(pdf|txt|md|markdown)$/i.test(key) || VIDEO_EXT.test(key);
 }
 
 /** Validates a folder prefix. '' is the root; returns null when the path is not usable. */
@@ -62,7 +84,7 @@ export function childDirsFromIds(parent, ids) {
     const slash = rest.indexOf('/');
     if (slash <= 0) continue; // a lesson directly in `parent`, not a folder
     const seg = rest.slice(0, slash);
-    if (seg === '_resources' || seg === '_notes') continue;
+    if (seg === '_resources' || seg === '_notes' || isReservedDir(seg)) continue;
     out.add(parent ? parent + '/' + seg : seg);
   }
   return [...out];
