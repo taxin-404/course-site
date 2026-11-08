@@ -4,6 +4,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { Api, AdminUser, BulkResult } from './api';
 import { AdminFiles } from './admin-files';
 import { OptionsMenu } from './options-menu';
+import { AccessMode, applyCourseAccess } from './course-access';
 
 type SortKey = 'email' | 'progress' | 'courses';
 type RoleFilter = 'all' | 'student' | 'admin';
@@ -142,6 +143,7 @@ const MODES: { key: CourseMode; label: string }[] = [
       @if (selected().size) {
         <div class="adm-bulk" role="toolbar" aria-label="Bulk actions">
           <strong>{{ selected().size }} selected</strong>
+          <button type="button" [disabled]="busy()" (click)="openAccess()">Access</button>
           <button type="button" [disabled]="busy()" (click)="bulkRole(true)">Make admin</button>
           <button type="button" [disabled]="busy()" (click)="bulkRole(false)">Remove admin</button>
           <button type="button" class="d" [disabled]="busy()" (click)="askBulkDelete()">Delete</button>
@@ -382,6 +384,59 @@ const MODES: { key: CourseMode; label: string }[] = [
       </div>
     }
 
+    <!-- Bulk course access dialog -->
+    @if (accessOpen()) {
+      <div class="adm-scrim" (click)="closeAccess()"></div>
+      <div class="adm-dialog" role="dialog" aria-modal="true" aria-label="Give or remove course access">
+        <header class="adm-dialog-top">
+          <h3>{{ accessMode() === 'add' ? 'Give course access' : 'Remove course access' }}</h3>
+          <button type="button" class="adm-close" aria-label="Close" (click)="closeAccess()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+          </button>
+        </header>
+        <div class="adm-form">
+          <p class="adm-muted sm">
+            For <b>{{ accessTargets().length }}</b> selected student{{ accessTargets().length === 1 ? '' : 's' }}.
+            @if (accessSkipped()) { Admins and the owner always see every course, so they are left unchanged. }
+          </p>
+
+          <div class="seg" role="group" aria-label="Give or remove course access">
+            <button type="button" [class.on]="accessMode() === 'add'" (click)="accessMode.set('add')">Give access</button>
+            <button type="button" [class.on]="accessMode() === 'remove'" (click)="accessMode.set('remove')">Remove access</button>
+          </div>
+
+          <div class="field">
+            <span>Courses @if (accessCourses().length) { <em>· {{ accessCourses().length }} selected</em> }</span>
+            @if (manyCourses()) {
+              <label class="adm-search sm">
+                <svg class="adm-mag" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+                <input type="search" placeholder="Search courses..." aria-label="Search courses for these users" [value]="accessQuery()" (input)="accessQuery.set($any($event.target).value)" />
+              </label>
+            }
+            <div class="adm-chips scroll">
+              @for (c of accessCourseVisible(); track c) {
+                <label class="chip" [class.on]="accessCourses().includes(c)"><input type="checkbox" [checked]="accessCourses().includes(c)" (change)="toggleAccessCourse(c)" /><span>{{ c }}</span></label>
+              } @empty {
+                <span class="adm-muted">{{ accessQuery().trim() ? 'No course matches your search.' : 'No courses found in the bucket yet.' }}</span>
+              }
+            </div>
+            @if (accessCourses().length) {
+              <p class="adm-muted sm">
+                @if (accessMode() === 'add') { Adds each chosen course without touching the others. }
+                @else { Takes each chosen course away; notes and progress are kept, so giving it back restores them. }
+              </p>
+            }
+          </div>
+        </div>
+        <footer class="adm-dialog-foot">
+          <button type="button" (click)="closeAccess()">Cancel</button>
+          <button type="button" class="p" [disabled]="busy() || !accessCourses().length || !accessTargets().length" (click)="applyAccess()">
+            {{ busy() ? 'Saving...' : (accessMode() === 'add' ? 'Give access' : 'Remove access') }}
+          </button>
+        </footer>
+      </div>
+    }
+
     <!-- Reset password dialog -->
     @if (pwFor(); as u) {
       <div class="adm-scrim" (click)="closeReset()"></div>
@@ -493,6 +548,12 @@ export class Admin implements OnInit {
   protected readonly confirm = signal<Confirm | null>(null);
   protected readonly toasts = signal<Toast[]>([]);
 
+  // Bulk course access: give a course to, or take it from, many users at once.
+  protected readonly accessOpen = signal(false);
+  protected readonly accessMode = signal<AccessMode>('add');
+  protected readonly accessCourses = signal<string[]>([]);
+  protected readonly accessQuery = signal('');
+
   protected readonly roles = ROLES;
   protected readonly signins = SIGNINS;
   protected readonly modes = MODES;
@@ -511,6 +572,19 @@ export class Admin implements OnInit {
   protected readonly visibleCourses = computed(() => this.orderCourses(this.courseList(), this.courseQuery(), this.courseFilter()));
   protected readonly newCourseVisible = computed(() => this.orderCourses(this.courseList(), this.newCourseQuery(), this.newCourses()));
   protected readonly bulkCourseVisible = computed(() => this.orderCourses(this.courseList(), this.bulkCourseQuery(), this.bulkCourses()));
+  protected readonly accessCourseVisible = computed(() => this.orderCourses(this.courseList(), this.accessQuery(), this.accessCourses()));
+
+  // ---- bulk course access -------------------------------------------------
+  /** Selected users whose access can actually change: not the owner, not you, not an admin. */
+  protected readonly accessTargets = computed(() => {
+    const me = this.api.me()?.id;
+    return this.users().filter((u) => this.selected().has(u.id) && !u.owner && u.id !== me && !u.is_admin);
+  });
+  /** True when some selected row is an admin or the owner, so the dialog can say they are left alone. */
+  protected readonly accessSkipped = computed(() => {
+    const me = this.api.me()?.id;
+    return this.users().some((u) => this.selected().has(u.id) && (u.owner || u.id === me || u.is_admin));
+  });
 
   /** The course search box only appears once the list is long enough to need it. */
   protected readonly manyCourses = computed(() => this.courseList().length > 6);
@@ -669,6 +743,49 @@ export class Admin implements OnInit {
     } finally {
       this.saving.set(false);
     }
+  }
+
+  // ---- bulk course access ------------------------------------------------
+  protected openAccess(): void {
+    if (!this.accessTargets().length) {
+      this.toast('Select a student first — admins and the owner already see every course.');
+      return;
+    }
+    // The course filter usually already names the course being handed out.
+    const f = this.courseFilter();
+    this.accessMode.set('add');
+    this.accessCourses.set(f.length === 1 ? [f[0]] : []);
+    this.accessQuery.set('');
+    this.accessOpen.set(true);
+  }
+  protected closeAccess(): void { this.accessOpen.set(false); }
+  protected toggleAccessCourse(c: string): void {
+    this.accessCourses.update((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
+  }
+  protected async applyAccess(): Promise<void> {
+    const chosen = this.accessCourses();
+    const targets = this.accessTargets();
+    if (!chosen.length || !targets.length) return;
+    const mode = this.accessMode();
+    this.busy.set(true);
+    let ok = 0;
+    for (const u of targets) {
+      try {
+        // The endpoint replaces the whole list, so send this user's next list built from the one
+        // they already have: a give is a union, a remove a difference, and other courses survive.
+        await this.api.setCourses(u.id, applyCourseAccess(u.courses, chosen, mode));
+        ok++;
+      } catch {
+        /* keep going, report the count */
+      }
+    }
+    this.busy.set(false);
+    if (!ok) { this.toast('Could not update course access.', true); return; }
+    this.accessOpen.set(false);
+    this.clearSel();
+    await this.load();
+    const what = chosen.length === 1 ? chosen[0] : chosen.length + ' courses';
+    this.toast((mode === 'add' ? 'Gave ' + what + ' to ' : 'Removed ' + what + ' from ') + ok + ' user' + (ok === 1 ? '' : 's') + '.');
   }
 
   protected async toggleRole(u: AdminUser): Promise<void> {

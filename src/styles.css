@@ -582,8 +582,8 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   .adm-fgrid{display:grid;grid-template-columns:1fr;gap:.5rem}
   .adm-fgrid .adm-search{min-width:0}
   .adm-fgrid .adm-sort{margin-left:0;width:100%;min-height:40px}
-  .adm-fgrid .seg,.adm-fcourses .seg{display:flex;width:100%}
-  .adm-fgrid .seg button,.adm-fcourses .seg button{flex:1;min-height:38px}
+  .adm-fgrid .seg,.adm-fcourses .seg,.adm-form .seg{display:flex;width:100%}
+  .adm-fgrid .seg button,.adm-fcourses .seg button,.adm-form .seg button{flex:1;min-height:38px}
   .adm-search{min-width:100%}
   .adm-search.sm{width:100%}
   .adm-lhead{display:none}
