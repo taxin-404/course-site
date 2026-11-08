@@ -438,6 +438,23 @@ test('a throwing lesson limiter falls back to D1 lesson_hits', async () => {
   assert.ok(!logs.lines.some((line) => line.includes(email)), 'no email in the log');
 });
 
+test('a locked course hides its lessons but still reports how many there are', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course'); // deliberately not enrolled in Other
+  const { cookie } = await login(email);
+  invalidateCourse();
+
+  const courses = await (await call('/api/course', { headers: browser(cookie) })).json();
+  const other = courses.find((c) => c.title === 'Other');
+  assert.equal(other.locked, true, 'Other is locked');
+  assert.deepEqual(other.sections, [], 'its lessons stay hidden');
+  assert.equal(other.lessonCount, 1, 'but its lesson count is visible for the card');
+
+  const mine = courses.find((c) => c.title === 'Course');
+  assert.equal(mine.locked, false);
+  assert.equal(mine.lessonCount, mine.sections.flatMap((s) => s.lessons).length, 'an open course reports the same count it lists');
+});
+
 test('a cold course listing reads its three metadata tables in one batched round trip', async () => {
   const email = await addUser();
   await enroll(email, 'Course');
