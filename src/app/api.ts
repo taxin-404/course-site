@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import { fetchWithRetry } from './api-retry';
 
 export interface Subtitle { key: string; lang: string }
 export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'youtube'; done: boolean; subtitles?: Subtitle[] }
@@ -52,28 +53,34 @@ export class Api {
   }
 
   private async req<T>(path: string, body?: unknown, method?: string): Promise<T> {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), REQ_TIMEOUT_MS);
-    let res: Response;
-    try {
-      res = await fetch('/api/' + path, {
-        signal: ctrl.signal,
-        ...(body === undefined && !method ? {} : {
-          method: method ?? 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: body === undefined ? undefined : JSON.stringify(body),
-        }),
-      });
-    } catch (e) {
-      // Our own deadline fired: report it like any other failed call so the caller can recover
-      // (the sign-in screen still renders, because /api/config does no database work).
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        throw new ApiError('The server is taking too long to respond. Please try again.', 0);
+    // Body-less, method-less calls are GETs. Everything else is a write, and writes are
+    // never retried: the first attempt may have been applied before the answer was lost.
+    const verb = body === undefined && !method ? 'GET' : (method ?? 'POST');
+    const send = async (): Promise<Response> => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), REQ_TIMEOUT_MS);
+      try {
+        return await fetch('/api/' + path, {
+          signal: ctrl.signal,
+          ...(verb === 'GET' ? {} : {
+            method: verb,
+            headers: { 'content-type': 'application/json' },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          }),
+        });
+      } catch (e) {
+        // Our own deadline fired: report it like any other failed call so the caller can recover
+        // (the sign-in screen still renders, because /api/config does no database work).
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          throw new ApiError('The server is taking too long to respond. Please try again.', 0);
+        }
+        throw e;
+      } finally {
+        clearTimeout(timer);
       }
-      throw e;
-    } finally {
-      clearTimeout(timer);
-    }
+    };
+    // One retry for GETs on 503 or a transport/timeout failure; see api-retry.ts.
+    const res = await fetchWithRetry(verb, send);
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) this.signOutLocal();
     if (!res.ok) throw new ApiError(data.error || 'Request failed', res.status);
