@@ -69,7 +69,15 @@ export function nonceOk(claim, cookie) {
 }
 const nonceCookie = (nonce, secure) => `gn=${nonce}; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict; Path=/; Max-Age=43200`;
 
-const SCHEMA = [
+// Bump this whenever SCHEMA or MIGRATIONS changes. The next cold start then runs the full
+// idempotent path once per database. schema.test.mjs pins a hash of both lists and fails
+// with this instruction if the DDL changed without a bump.
+export const SCHEMA_VERSION = '1';
+
+export const SCHEMA = [
+  // Read on every cold start; written last by initSchema. A matching version row makes the
+  // rest of this list and migrate() unnecessary.
+  'CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)',
   'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, sid TEXT)',
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS pdf_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
@@ -99,26 +107,66 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS course_meta (course TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '')",
 ];
 let ready;
+const ADMIN_PW_KEY = 'admin_pw';
+// DDL that upgrades an existing database. migrate() applies the conditional ones; exporting
+// the list lets the schema hash test cover it as well as SCHEMA.
+const MIGRATE_USER_GOOGLE_SUB = 'ALTER TABLE users ADD COLUMN google_sub TEXT';
+const MIGRATE_USER_VER = 'ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0';
+const MIGRATE_USER_SID = 'ALTER TABLE users ADD COLUMN sid TEXT';
+const MIGRATE_RESOURCE_KIND = "ALTER TABLE resources ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'";
+const MIGRATE_RESOURCE_FILE_KEY = 'ALTER TABLE resources ADD COLUMN file_key TEXT';
+const MIGRATE_USERS_GOOGLE_SUB_INDEX = 'CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)';
+const MIGRATE_YOUTUBE = 'CREATE TABLE IF NOT EXISTS youtube_lessons (id TEXT PRIMARY KEY, yt TEXT NOT NULL, created INTEGER NOT NULL)';
+const MIGRATE_ENROLLMENTS = 'CREATE TABLE IF NOT EXISTS enrollments (user_id INTEGER NOT NULL, course TEXT NOT NULL, PRIMARY KEY (user_id, course))';
+export const MIGRATIONS = [
+  MIGRATE_USER_GOOGLE_SUB,
+  MIGRATE_USER_VER,
+  MIGRATE_USER_SID,
+  MIGRATE_RESOURCE_KIND,
+  MIGRATE_RESOURCE_FILE_KEY,
+  MIGRATE_USERS_GOOGLE_SUB_INDEX,
+  MIGRATE_YOUTUBE,
+  MIGRATE_ENROLLMENTS,
+];
+/** A cheap, non-reversible marker for ADMIN_PASSWORD; never the password itself. */
+async function adminFingerprint(password) {
+  return b64(await crypto.subtle.digest('SHA-256', enc.encode(password)));
+}
+async function setMeta(env, k, v) {
+  await env.DB.prepare('INSERT INTO schema_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').bind(k, v).run();
+}
 // The owner comes from the Cloudflare secret ADMIN_EMAIL: the row is created on the first
 // request if missing and always kept as an admin, so that email can sign in with Google
 // (the Google callback links the account by matching the verified email).
 // ADMIN_PASSWORD is optional but authoritative: when it is set the owner can also sign in
 // with that password, when it is missing or changed the stored password follows the secret,
 // and with no secret at all the row keeps the unusable-password marker so password login fails.
-async function seedAdmin(env) {
+// `storedFp` is the fingerprint saved by the previous run, so a matching version gate can
+// skip the PBKDF2 derive on every cold start.
+async function seedAdmin(env, storedFp) {
   const email = String(env.ADMIN_EMAIL || '').trim().toLowerCase();
   if (!email) return;
   const password = env.ADMIN_PASSWORD ? String(env.ADMIN_PASSWORD) : '';
+  const fp = password ? await adminFingerprint(password) : '';
   const u = await env.DB.prepare('SELECT id, is_admin, pass FROM users WHERE email = ?').bind(email).first();
   if (!u) {
-    await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, 1)').bind(email, password ? await hashPw(password) : await unusablePw()).run();
+    await env.DB.prepare('INSERT INTO users (email, pass, is_admin) VALUES (?, ?, 1)')
+      .bind(email, password ? await hashPw(password) : await unusablePw()).run();
+    await setMeta(env, ADMIN_PW_KEY, fp);
     return;
   }
   if (!u.is_admin) await env.DB.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').bind(u.id).run();
-  if (password && (u.pass === '!' || !(await checkPw(password, u.pass)))) {
-    await env.DB.prepare('UPDATE users SET pass = ? WHERE id = ?').bind(await hashPw(password), u.id).run();
-  } else if (!password && u.pass !== '!') {
-    await env.DB.prepare('UPDATE users SET pass = ? WHERE id = ?').bind(await unusablePw(), u.id).run();
+  if (password) {
+    // PBKDF2 only when the secret is new/changed, or the row has no usable password.
+    if (u.pass === '!' || storedFp !== fp) {
+      await env.DB.prepare('UPDATE users SET pass = ? WHERE id = ?').bind(await hashPw(password), u.id).run();
+      await setMeta(env, ADMIN_PW_KEY, fp);
+    }
+  } else {
+    if (u.pass !== '!') {
+      await env.DB.prepare('UPDATE users SET pass = ? WHERE id = ?').bind(await unusablePw(), u.id).run();
+    }
+    if (storedFp) await setMeta(env, ADMIN_PW_KEY, '');
   }
 }
 async function migrate(env) {
@@ -130,17 +178,17 @@ async function migrate(env) {
   ]);
   const userHas = new Set((usersCols.results || []).map((r) => r.name));
   const resHas = new Set((resCols.results || []).map((r) => r.name));
-  if (!userHas.has('google_sub')) await env.DB.prepare('ALTER TABLE users ADD COLUMN google_sub TEXT').run();
-  if (!userHas.has('ver')) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
-  if (!userHas.has('sid')) await env.DB.prepare('ALTER TABLE users ADD COLUMN sid TEXT').run();
-  if (!resHas.has('kind')) await env.DB.prepare("ALTER TABLE resources ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'").run();
-  if (!resHas.has('file_key')) await env.DB.prepare('ALTER TABLE resources ADD COLUMN file_key TEXT').run();
-  await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)').run();
+  if (!userHas.has('google_sub')) await env.DB.prepare(MIGRATE_USER_GOOGLE_SUB).run();
+  if (!userHas.has('ver')) await env.DB.prepare(MIGRATE_USER_VER).run();
+  if (!userHas.has('sid')) await env.DB.prepare(MIGRATE_USER_SID).run();
+  if (!resHas.has('kind')) await env.DB.prepare(MIGRATE_RESOURCE_KIND).run();
+  if (!resHas.has('file_key')) await env.DB.prepare(MIGRATE_RESOURCE_FILE_KEY).run();
+  await env.DB.prepare(MIGRATE_USERS_GOOGLE_SUB_INDEX).run();
   // YouTube lessons are managed from the Admin panel. Created here (before listCourse runs
   // below) and seeded once from worker/youtube.js, so the hadYt guard makes a later delete
   // permanent: a removed seed never comes back.
   const hadYt = await env.DB.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type = 'table' AND name = 'youtube_lessons'").first();
-  await env.DB.prepare('CREATE TABLE IF NOT EXISTS youtube_lessons (id TEXT PRIMARY KEY, yt TEXT NOT NULL, created INTEGER NOT NULL)').run();
+  await env.DB.prepare(MIGRATE_YOUTUBE).run();
   if (!hadYt.c) {
     for (const [rawPath, link] of Object.entries(YOUTUBE_LESSONS)) {
       const parts = String(rawPath).split('/').map((s) => s.trim()).filter(Boolean);
@@ -150,7 +198,7 @@ async function migrate(env) {
     }
   }
   const had = await env.DB.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type = 'table' AND name = 'enrollments'").first();
-  await env.DB.prepare('CREATE TABLE IF NOT EXISTS enrollments (user_id INTEGER NOT NULL, course TEXT NOT NULL, PRIMARY KEY (user_id, course))').run();
+  await env.DB.prepare(MIGRATE_ENROLLMENTS).run();
   if (!had.c) { // first deploy only: today's students keep access to every current course
     const courses = (await listCourse(env)).map((c) => c.title);
     const users = (await env.DB.prepare('SELECT id FROM users').all()).results;
@@ -228,6 +276,43 @@ export function guardEnv(env) {
     },
   });
 }
+/**
+ * One cheap read decides whether the rest of the schema work is needed. It also returns the
+ * stored ADMIN_PASSWORD fingerprint so a matching cold start can skip the PBKDF2 derive.
+ * A missing schema_meta table is the expected first-run signal; a stalled read is not — it
+ * must reach the deadline instead of silently starting the full path.
+ */
+async function readSchemaMeta(env) {
+  try {
+    const rows = await env.DB.prepare("SELECT k, v FROM schema_meta WHERE k IN ('schema', 'admin_pw')").all();
+    const meta = {};
+    for (const row of rows.results || []) meta[row.k] = row.v;
+    return meta;
+  } catch (e) {
+    if (e && e.dbTimeout) throw e;
+    return null;
+  }
+}
+
+/**
+ * Cold-start schema bootstrap. When schema_meta names the current SCHEMA_VERSION the tables
+ * and columns already exist, so only seedAdmin's single owner read remains. Anything else —
+ * no table, no row, a different version — runs the idempotent SCHEMA + migrate() path and
+ * records the version last, so a failed step can never activate the fast path.
+ */
+export async function initSchema(env) {
+  const meta = await readSchemaMeta(env);
+  if (meta && meta.schema === SCHEMA_VERSION) {
+    await seedAdmin(env, meta[ADMIN_PW_KEY] || '');
+    return;
+  }
+  await env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q)));
+  await migrate(env);
+  // A pre-existing fingerprint still applies, so an upgrade does not re-derive needlessly.
+  await seedAdmin(env, meta ? meta[ADMIN_PW_KEY] : undefined);
+  await setMeta(env, 'schema', SCHEMA_VERSION);
+}
+
 export function ensureSchema(env, deadlineMs = SCHEMA_DEADLINE_MS) {
   if (!ready) {
     // Start the work once, but keep the raw promise out of the deadline race. A request
@@ -236,9 +321,7 @@ export function ensureSchema(env, deadlineMs = SCHEMA_DEADLINE_MS) {
     // isolate waited on it with no timer of its own. Instead, every caller below races
     // the shared promise against its own deadline, and a timeout clears the cache so the
     // next request retries (the schema statements are idempotent).
-    ready = env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q)))
-      .then(() => migrate(env))
-      .then(() => seedAdmin(env));
+    ready = initSchema(env);
     // The abandoned work cannot be cancelled; observe its rejection so it is not
     // reported as unhandled when no waiter is left.
     ready.catch(() => {});
