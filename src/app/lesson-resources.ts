@@ -1,20 +1,23 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { Api, Lesson, ResourceItem } from './api';
 import { PdfViewer } from './pdf-viewer';
+import { TextViewer } from './text-viewer';
 import { NotesControls } from './notes-controls';
 
-/** Links and PDFs an admin attached to a lesson; students only ever see the list. */
+/** Links and files (PDF/TXT/MD) an admin attached to a lesson; students only ever see the list. */
 @Component({
   selector: 'app-lesson-resources',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [PdfViewer, NotesControls],
+  imports: [PdfViewer, TextViewer, NotesControls],
   template: `
     <div class="lr">
       @if (isAdmin()) {
-        <form class="lr-form" (submit)="$event.preventDefault(); mode() === 'pdf' ? upload() : add()">
+        <form class="lr-form" (submit)="$event.preventDefault(); mode() === 'link' ? add() : upload()">
           <div class="seg lr-mode" role="group" aria-label="Resource type">
             <button type="button" [class.on]="mode() === 'link'" [attr.aria-pressed]="mode() === 'link'" (click)="setMode('link')">Link</button>
             <button type="button" [class.on]="mode() === 'pdf'" [attr.aria-pressed]="mode() === 'pdf'" (click)="setMode('pdf')">PDF</button>
+            <button type="button" [class.on]="mode() === 'txt'" [attr.aria-pressed]="mode() === 'txt'" (click)="setMode('txt')">TXT</button>
+            <button type="button" [class.on]="mode() === 'md'" [attr.aria-pressed]="mode() === 'md'" (click)="setMode('md')">MD</button>
           </div>
           <input
             type="text"
@@ -34,7 +37,13 @@ import { NotesControls } from './notes-controls';
               (input)="url.set($any($event.target).value)"
             />
           } @else {
-            <input #fileInput type="file" accept="application/pdf,.pdf" aria-label="PDF file" (change)="pick($event)" />
+            <input
+              #fileInput
+              type="file"
+              [attr.accept]="mode() === 'pdf' ? 'application/pdf,.pdf' : mode() === 'txt' ? 'text/plain,.txt' : 'text/markdown,.md,.markdown'"
+              [attr.aria-label]="mode() === 'pdf' ? 'PDF file' : mode() === 'txt' ? 'Text file' : 'Markdown file'"
+              (change)="pick($event)"
+            />
           }
           <input
             type="text"
@@ -45,7 +54,7 @@ import { NotesControls } from './notes-controls';
             (input)="note.set($any($event.target).value)"
           />
           <button class="p" type="submit" [disabled]="saving()">
-            {{ saving() ? (mode() === 'pdf' ? 'Uploading...' : 'Adding...') : (mode() === 'pdf' ? 'Upload PDF' : 'Add resource') }}
+            {{ saving() ? (mode() === 'link' ? 'Adding...' : 'Uploading...') : (mode() === 'link' ? 'Add resource' : 'Upload ' + mode().toUpperCase()) }}
           </button>
         </form>
       }
@@ -63,23 +72,23 @@ import { NotesControls } from './notes-controls';
           @for (r of rows(); track r.id) {
             <li class="lr-item">
               <span class="lr-icon" aria-hidden="true">
-                @if (r.kind === 'pdf') {
-                  <svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4v13H7z" /><path d="M14 3.5v4h4" /><path d="M9.5 12.5h5M9.5 16h5" /></svg>
-                } @else {
+                @if (r.kind === 'link') {
                   <svg viewBox="0 0 24 24"><path d="M9.5 14.5 14.5 9.5" /><path d="M11 7l1.8-1.8a4 4 0 0 1 5.6 5.6L16.6 12.6" /><path d="M13 17l-1.8 1.8a4 4 0 0 1-5.6-5.6L7.4 11.4" /></svg>
+                } @else {
+                  <svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4v13H7z" /><path d="M14 3.5v4h4" /><path d="M9.5 12.5h5M9.5 16h5" /></svg>
                 }
               </span>
               <div class="lr-body">
-                @if (r.kind === 'pdf') {
-                  <button type="button" class="lr-title lr-open" (click)="open(r)">{{ r.title }}</button>
-                  <span class="lr-host">PDF</span>
-                } @else {
+                @if (r.kind === 'link') {
                   <a class="lr-title" [href]="r.url" target="_blank" rel="noopener noreferrer">{{ r.title }}</a>
                   <span class="lr-host">{{ host(r.url) }}</span>
+                } @else {
+                  <button type="button" class="lr-title lr-open" (click)="open(r)">{{ r.title }}</button>
+                  <span class="lr-host">{{ r.kind.toUpperCase() }}</span>
                 }
                 @if (r.note) { <p class="lr-note">{{ r.note }}</p> }
               </div>
-              @if (isAdmin()) {
+              @if (isAdmin() && !r.shared) {
                 <span class="lr-tools">
                   <button type="button" class="lr-edit" aria-label="Edit resource" title="Edit resource" (click)="edit(r)">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
@@ -88,6 +97,8 @@ import { NotesControls } from './notes-controls';
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>
                   </button>
                 </span>
+              } @else if (r.shared) {
+                <span class="lr-shared">Shared · {{ r.scope }}</span>
               }
             </li>
           }
@@ -105,15 +116,19 @@ import { NotesControls } from './notes-controls';
                 <span class="lbl">Back</span>
               </button>
               <span class="player-title">{{ r.title }}</span>
-              @if (pdfViewer(); as pv) { <app-notes-controls [viewer]="pv" /> }
+              @if (r.kind === 'pdf' && pdfViewer(); as pv) { <app-notes-controls [viewer]="pv" /> }
             </div>
-            <app-pdf-viewer [key]="r.url" />
+            @if (r.kind === 'pdf') {
+              <app-pdf-viewer [key]="r.url" />
+            } @else {
+              <app-text-viewer [key]="r.url" [md]="r.kind === 'md'" />
+            }
           </div>
         } @placeholder {
-          <div class="lr-viewer lr-viewer-loading" aria-live="polite">Loading PDF...</div>
+          <div class="lr-viewer lr-viewer-loading" aria-live="polite">Loading...</div>
         } @error {
           <div class="lr-viewer lr-viewer-loading" role="alert">
-            Could not load the PDF. <button type="button" class="lr-link" (click)="close()">Close</button>
+            Could not load this file. <button type="button" class="lr-link" (click)="close()">Close</button>
           </div>
         }
       }
@@ -138,7 +153,7 @@ import { NotesControls } from './notes-controls';
                 <input type="url" [value]="editUrl()" (input)="editUrl.set($any($event.target).value)" maxlength="800" autocomplete="off" spellcheck="false" placeholder="https://..." />
               </label>
             } @else {
-              <p class="adm-muted sm">To replace the PDF, delete it and upload a new one.</p>
+              <p class="adm-muted sm">To replace this file, delete it and upload a new one.</p>
             }
             <label class="field">
               <span>Note</span>
@@ -168,7 +183,7 @@ export class LessonResources {
   protected readonly saving = signal(false);
   protected readonly error = signal('');
   protected readonly isAdmin = computed(() => this.api.me()?.is_admin === 1);
-  protected readonly mode = signal<'link' | 'pdf'>('link');
+  protected readonly mode = signal<'link' | 'pdf' | 'txt' | 'md'>('link');
   protected readonly file = signal<File | null>(null);
   protected readonly opened = signal<ResourceItem | null>(null);
   protected readonly editing = signal<ResourceItem | null>(null);
@@ -240,7 +255,7 @@ export class LessonResources {
 
   protected reload(): void { void this.load(this.lesson().id); }
 
-  protected setMode(mode: 'link' | 'pdf'): void {
+  protected setMode(mode: 'link' | 'pdf' | 'txt' | 'md'): void {
     this.mode.set(mode);
     this.error.set('');
   }
@@ -249,7 +264,7 @@ export class LessonResources {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0] ?? null;
     this.file.set(file);
-    if (file && !this.title().trim()) this.title.set(file.name.replace(/\.pdf$/i, '').slice(0, 120));
+    if (file && !this.title().trim()) this.title.set(file.name.replace(/\.(pdf|txt|md|markdown)$/i, '').slice(0, 120));
   }
 
   protected open(r: ResourceItem): void {
@@ -333,9 +348,15 @@ export class LessonResources {
     if (this.saving()) return;
     const file = this.file();
     this.error.set('');
-    if (!file) { this.error.set('Choose a PDF file.'); return; }
-    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') { this.error.set('Choose a PDF file.'); return; }
-    if (file.size > 25 * 1024 * 1024) { this.error.set('PDFs must be 25 MB or smaller.'); return; }
+    if (!file) { this.error.set('Choose a PDF, text or Markdown file.'); return; }
+    const name = file.name;
+    let cap = 0;
+    let tooBig = '';
+    if (/\.pdf$/i.test(name)) { cap = 25 * 1024 * 1024; tooBig = 'PDFs must be 25 MB or smaller.'; }
+    else if (/\.txt$/i.test(name)) { cap = 2 * 1024 * 1024; tooBig = 'Text files must be 2 MB or smaller.'; }
+    else if (/\.(md|markdown)$/i.test(name)) { cap = 2 * 1024 * 1024; tooBig = 'Markdown files must be 2 MB or smaller.'; }
+    else { this.error.set('Choose a PDF, text or Markdown file.'); return; }
+    if (file.size > cap) { this.error.set(tooBig); return; }
     this.saving.set(true);
     try {
       await this.api.uploadResourceFile(this.lesson().id, file, this.title().trim() || undefined, this.note().trim() || undefined);
@@ -346,7 +367,7 @@ export class LessonResources {
       if (input) input.value = '';
       await this.load();
     } catch (e) {
-      this.error.set(e instanceof Error ? e.message : 'Could not upload that PDF.');
+      this.error.set(e instanceof Error ? e.message : 'Could not upload that file.');
     } finally {
       this.saving.set(false);
     }
