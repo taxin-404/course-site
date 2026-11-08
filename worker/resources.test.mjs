@@ -51,14 +51,23 @@ async function login(email, { pw = STUDENT_PW, ip = '10.0.0.1' } = {}) {
 }
 
 // The Worker memoises schema setup per process, so boot the schema once, then create the
-// enrolled student whose session every test reuses.
+// enrolled student and an admin whose sessions every test reuses.
 let cookie = '';
+let adminCookie = '';
 before(async () => {
   await call('/api/me').then((res) => assert.equal(res.status, 401)); // boot the schema
   const email = await addUser();
   await enroll(email, 'Course');
   ({ cookie } = await login(email));
+  const admin = await addUser({ admin: true });
+  ({ cookie: adminCookie } = await login(admin));
 });
+
+function fileForm(name, body) {
+  const form = new FormData();
+  form.append('file', new File([body], name));
+  return form;
+}
 
 test('listCourse lists text/markdown lessons and skips the RESOURCE folder', async () => {
   const data = await call('/api/course', { headers: { cookie } }).then((r) => r.json());
@@ -78,4 +87,50 @@ test('serve returns text and markdown with the right content type', async () => 
   const txt = await call('/api/media/Course/Module%2001/notes.txt', { headers: browser(cookie) });
   assert.equal(txt.status, 200);
   assert.match(txt.headers.get('content-type'), /text\/plain/);
+});
+
+test('a txt resource uploads with kind txt and a .txt file_key', async () => {
+  const res = await call('/api/admin/lesson/Course%2FModule%2001%2Fguide.md/resources/file',
+    { method: 'POST', headers: { cookie: adminCookie, origin: ORIGIN }, body: fileForm('cheat.txt', 'plain text') });
+  assert.equal(res.status, 200);
+  const { resource } = await res.json();
+  assert.equal(resource.kind, 'txt');
+  assert.match(resource.url, /^Course\/_resources\/[0-9a-f-]+\.txt$/);
+});
+
+test('a .markdown resource maps to kind md; the legacy /pdf route still works', async () => {
+  const md = await call('/api/admin/lesson/Course%2FModule%2001%2Fguide.md/resources/file',
+    { method: 'POST', headers: { cookie: adminCookie, origin: ORIGIN }, body: fileForm('doc.markdown', '# Doc') });
+  assert.equal((await md.json()).resource.kind, 'md');
+  const pdf = await call('/api/admin/lesson/Course%2FModule%2001%2Fguide.md/resources/pdf',
+    { method: 'POST', headers: { cookie: adminCookie, origin: ORIGIN }, body: fileForm('slides.pdf', '%PDF-1.4\nx') });
+  assert.equal(pdf.status, 200);
+  assert.equal((await pdf.json()).resource.kind, 'pdf');
+});
+
+test('text resources reject a NUL byte, an oversized body and an unknown extension', async () => {
+  const nul = await call('/api/admin/lesson/Course%2FModule%2001%2Fguide.md/resources/file',
+    { method: 'POST', headers: { cookie: adminCookie, origin: ORIGIN }, body: fileForm('bad.txt', new Uint8Array([65, 0, 66])) });
+  assert.equal(nul.status, 400);
+  const big = await call('/api/admin/lesson/Course%2FModule%2001%2Fguide.md/resources/file',
+    { method: 'POST', headers: { cookie: adminCookie, origin: ORIGIN }, body: fileForm('big.txt', 'x'.repeat(2 * 1024 * 1024 + 1)) });
+  assert.equal(big.status, 413);
+  const exe = await call('/api/admin/lesson/Course%2FModule%2001%2Fguide.md/resources/file',
+    { method: 'POST', headers: { cookie: adminCookie, origin: ORIGIN }, body: fileForm('run.exe', 'x') });
+  assert.equal(exe.status, 400);
+});
+
+test('GET reports real kinds; PATCH ignores a url on a file row; DELETE removes the object', async () => {
+  const listed = await call('/api/lesson/Course%2FModule%2001%2Fguide.md/resources', { headers: { cookie } });
+  const body = await listed.json(); // read the body once: a Response stream cannot be re-read
+  const kinds = body.resources.map((r) => r.kind);
+  assert.ok(kinds.includes('txt') && kinds.includes('md') && kinds.includes('pdf'));
+  const txt = body.resources.find((r) => r.kind === 'txt');
+  const patched = await call(`/api/admin/resources/${txt.id}`,
+    { method: 'PATCH', headers: { cookie: adminCookie, origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Cheat sheet', url: 'https://evil.example' }) });
+  assert.equal((await patched.json()).resource.url, txt.url, 'the file_key survives a url in the body');
+  const key = txt.url;
+  const del = await call(`/api/admin/resources/${txt.id}`, { method: 'DELETE', headers: { cookie: adminCookie, origin: ORIGIN } });
+  assert.equal(del.status, 200);
+  assert.equal(env.RESOURCES.has(key), false, 'the R2 object is gone');
 });

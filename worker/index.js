@@ -512,6 +512,18 @@ async function listCourse(env) {
 
 // ---- Course access: a student only gets the courses an admin gave them (admins get all) ----
 const courseOf = (key) => String(key).split('/')[0];
+// Lesson resources are either links or uploaded files. Deriving the kind from the extension
+// keeps a file's real type end-to-end (list, patch, delete) instead of collapsing to pdf/link.
+const RES_KINDS = { pdf: 'pdf', txt: 'txt', text: 'txt', md: 'md', markdown: 'md' };
+const RES_CONTENT_TYPE = {
+  pdf: 'application/pdf',
+  txt: 'text/plain; charset=utf-8',
+  md: 'text/markdown; charset=utf-8',
+};
+function resourceKindOf(filename) {
+  const m = /\.([a-z0-9]+)$/i.exec(String(filename || '').trim());
+  return (m && RES_KINDS[m[1].toLowerCase()]) || null;
+}
 // Lesson-scoped features (comments, notes, resources) all ask the same question: does this
 // key exist in the bucket, and may this user see the course it belongs to?
 async function lessonAccess(env, u, key) {
@@ -1347,34 +1359,45 @@ const handle = async (req, env, state = {}) => {
         if (access !== 'ok') return accessError(access);
         if (m === 'GET') {
           const rows = (await env.DB.prepare('SELECT id, title, url, note, kind, file_key FROM resources WHERE lesson = ? ORDER BY created ASC').bind(key).all()).results;
-          const resources = rows.map((r) => ({
-            id: r.id,
-            title: r.title,
-            url: r.kind === 'pdf' ? (r.file_key || '') : r.url,
-            note: r.note,
-            kind: r.kind === 'pdf' ? 'pdf' : 'link',
-          }));
+          const resources = rows.map((r) => {
+            const kind = ['pdf', 'txt', 'md'].includes(r.kind) ? r.kind : 'link';
+            return {
+              id: r.id,
+              title: r.title,
+              url: kind === 'link' ? r.url : (r.file_key || ''),
+              note: r.note,
+              kind,
+            };
+          });
           return json({ resources });
         }
       }
       if (path.startsWith('/api/admin/')) {
         if (!u.is_admin) return json({ error: 'Admins only' }, 403);
-        if (path.startsWith('/api/admin/lesson/') && path.endsWith('/resources/pdf') && m === 'POST') {
-          const key = decodeURIComponent(path.slice('/api/admin/lesson/'.length, -'/resources/pdf'.length));
+        if (path.startsWith('/api/admin/lesson/') && m === 'POST' && (path.endsWith('/resources/file') || path.endsWith('/resources/pdf'))) {
+          const suffix = path.endsWith('/resources/file') ? '/resources/file' : '/resources/pdf';
+          const key = decodeURIComponent(path.slice('/api/admin/lesson/'.length, -suffix.length));
           const access = await lessonAccess(env, u, key);
           if (access !== 'ok') return accessError(access);
-          if (Number(req.headers.get('content-length') || 0) > 26 * 1024 * 1024) return json({ error: 'PDFs must be 25 MB or smaller' }, 413);
+          if (Number(req.headers.get('content-length') || 0) > 26 * 1024 * 1024) return json({ error: 'That file is too large' }, 413);
           const form = await req.formData().catch(() => null);
           const file = form && form.get('file');
-          if (!form || !(file instanceof File)) return json({ error: 'Choose a PDF file' }, 400);
-          if (!/\.pdf$/i.test(file.name || '')) return json({ error: 'Choose a PDF file' }, 400);
-          if (file.size > 25 * 1024 * 1024) return json({ error: 'PDFs must be 25 MB or smaller' }, 413);
-          const head = String.fromCharCode(...new Uint8Array(await file.slice(0, 5).arrayBuffer()));
-          if (head !== '%PDF-') return json({ error: 'That file is not a PDF' }, 400);
+          if (!form || !(file instanceof File)) return json({ error: 'Choose a PDF, text or Markdown file' }, 400);
+          const kind = resourceKindOf(file.name);
+          if (!kind) return json({ error: 'Choose a PDF, text or Markdown file' }, 400);
+          const limit = kind === 'pdf' ? 25 * 1024 * 1024 : 2 * 1024 * 1024;
+          if (file.size > limit) return json({ error: kind === 'pdf' ? 'PDFs must be 25 MB or smaller' : 'Text files must be 2 MB or smaller' }, 413);
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          if (kind === 'pdf') {
+            const head = String.fromCharCode(...bytes.slice(0, 5));
+            if (head !== '%PDF-') return json({ error: 'That file is not a PDF' }, 400);
+          } else if (bytes.includes(0)) {
+            return json({ error: 'That file is not text' }, 400);
+          }
 
           const rawTitle = String(form.get('title') || '').trim();
           const note = String(form.get('note') || '').trim();
-          let title = rawTitle || String(file.name).replace(/\.pdf$/i, '').trim() || 'PDF';
+          let title = rawTitle || String(file.name).replace(/\.[a-z0-9]+$/i, '').trim() || 'File';
           if (title.length > 120) {
             if (rawTitle) return json({ error: 'Keep the title under 120 characters' }, 400);
             title = title.slice(0, 120);
@@ -1384,11 +1407,12 @@ const handle = async (req, env, state = {}) => {
           const n = await env.DB.prepare('SELECT COUNT(*) n FROM resources WHERE lesson = ?').bind(key).first();
           if (n.n >= 100) return json({ error: 'This lesson already has 100 resources' }, 400);
 
-          const fileKey = `${courseOf(key)}/_resources/${crypto.randomUUID()}.pdf`;
-          await env.RESOURCES.put(fileKey, await file.arrayBuffer(), { httpMetadata: { contentType: 'application/pdf' } });
+          const fileKey = `${courseOf(key)}/_resources/${crypto.randomUUID()}.${kind}`;
+          const contentType = RES_CONTENT_TYPE[kind];
+          await env.RESOURCES.put(fileKey, bytes, { httpMetadata: { contentType } });
           try {
-            const res = await env.DB.prepare("INSERT INTO resources (lesson, title, url, note, created_by, created, kind, file_key) VALUES (?, ?, '', ?, ?, ?, 'pdf', ?)").bind(key, title, note || null, u.id, Date.now(), fileKey).run();
-            return json({ resource: { id: res.meta.last_row_id, title, url: fileKey, note: note || null, kind: 'pdf' } });
+            const res = await env.DB.prepare("INSERT INTO resources (lesson, title, url, note, created_by, created, kind, file_key) VALUES (?, ?, '', ?, ?, ?, ?, ?)").bind(key, title, note || null, u.id, Date.now(), kind, fileKey).run();
+            return json({ resource: { id: res.meta.last_row_id, title, url: fileKey, note: note || null, kind } });
           } catch (e) {
             await env.RESOURCES.delete(fileKey).catch(() => {});
             throw e;
@@ -1428,8 +1452,9 @@ const handle = async (req, env, state = {}) => {
             if (!title) return json({ error: 'Give the resource a title' }, 400);
             if (title.length > 120) return json({ error: 'Keep the title under 120 characters' }, 400);
             if (note.length > 300) return json({ error: 'Keep the note under 300 characters' }, 400);
+            const isLink = row.kind === 'link';
             let url = '';
-            if (row.kind !== 'pdf') {
+            if (isLink) {
               url = String(b.url || '').trim();
               if (!url || url.length > 800) return json({ error: 'Enter a link' }, 400);
               let parsed;
@@ -1437,26 +1462,26 @@ const handle = async (req, env, state = {}) => {
               if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return json({ error: 'Enter a valid http(s) link' }, 400);
               await env.DB.prepare('UPDATE resources SET title = ?, note = ?, url = ? WHERE id = ?').bind(title, note || null, url, id).run();
             } else {
-              // A PDF's file is its file_key; a submitted url must never replace it.
+              // A file's url is its file_key; a submitted url must never replace it.
               await env.DB.prepare('UPDATE resources SET title = ?, note = ? WHERE id = ?').bind(title, note || null, id).run();
             }
             return json({
               resource: {
                 id,
                 title,
-                url: row.kind === 'pdf' ? String(row.file_key || '') : url,
+                url: isLink ? url : String(row.file_key || ''),
                 note: note || null,
-                kind: row.kind === 'pdf' ? 'pdf' : 'link',
+                kind: isLink ? 'link' : (['pdf', 'txt', 'md'].includes(row.kind) ? row.kind : 'link'),
               },
             });
           }
           if (mr && m === 'DELETE') {
             const id = Number(mr[1]);
-            const row = await env.DB.prepare('SELECT file_key FROM resources WHERE id = ?').bind(id).first();
+            const row = await env.DB.prepare('SELECT file_key, kind FROM resources WHERE id = ?').bind(id).first();
             await env.DB.prepare('DELETE FROM resources WHERE id = ?').bind(id).run();
             if (row && row.file_key) {
               await env.RESOURCES.delete(row.file_key).catch(() => {});
-              await env.DB.prepare('DELETE FROM pdf_notes WHERE lesson = ?').bind(row.file_key).run();
+              if (row.kind === 'pdf') await env.DB.prepare('DELETE FROM pdf_notes WHERE lesson = ?').bind(row.file_key).run();
             }
             return json({ ok: true });
           }
