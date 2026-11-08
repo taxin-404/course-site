@@ -1081,6 +1081,8 @@ const handle = async (req, env, state = {}) => {
         const mine = await myCourses(env, u);
         // A catalog: every course is listed. An ungranted one is `locked` and its
         // sections are withheld here, so a locked course can never leak its lessons.
+        // Its lesson count is still published, so its card shows "0/23 lessons" rather
+        // than "0/0" — a number, not the lessons themselves.
         return json((await listCourse(env)).map((c) => {
           const locked = !!mine && !mine.has(c.title);
           return {
@@ -1088,6 +1090,7 @@ const handle = async (req, env, state = {}) => {
             description: c.description || '',
             banner: c.banner ? `/api/banner/${encodeURIComponent(c.title)}` : '',
             locked,
+            lessonCount: c.sections.reduce((n, s) => n + s.lessons.length, 0),
             sections: locked ? [] : c.sections.map((s) => ({
               title: s.title,
               // publicLesson() drops the YouTube id: ids are fetched one at a time from

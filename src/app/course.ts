@@ -333,7 +333,9 @@ export class Course {
   });
 
   protected courseTotal(c: CourseData): number {
-    return c.sections.reduce((n, s) => n + s.lessons.length, 0);
+    // A locked course withholds its sections, so the server publishes the total; without
+    // this the card read "0/0" instead of "0/23".
+    return c.lessonCount ?? c.sections.reduce((n, s) => n + s.lessons.length, 0);
   }
   protected courseDone(c: CourseData): number {
     return c.sections.reduce((n, s) => n + s.lessons.filter((l) => l.done).length, 0);
