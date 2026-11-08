@@ -230,19 +230,24 @@ export function guardEnv(env) {
 }
 export function ensureSchema(env, deadlineMs = SCHEMA_DEADLINE_MS) {
   if (!ready) {
-    const run = withDeadline(
-      env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => migrate(env)).then(() => seedAdmin(env)),
-      deadlineMs,
-    );
-    // The abandoned promise cannot be cancelled; dropping it from the cache is what
-    // matters, so the next request retries cleanly (the schema statements are idempotent).
-    const guarded = run.catch((e) => {
-      if (ready === guarded) ready = undefined;
-      throw e;
-    });
-    ready = guarded;
+    // Start the work once, but keep the raw promise out of the deadline race. A request
+    // that starts the race and is then canceled (the client gives up) takes its timer
+    // with it, so `ready` could be left pending forever while every later request in the
+    // isolate waited on it with no timer of its own. Instead, every caller below races
+    // the shared promise against its own deadline, and a timeout clears the cache so the
+    // next request retries (the schema statements are idempotent).
+    ready = env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q)))
+      .then(() => migrate(env))
+      .then(() => seedAdmin(env));
+    // The abandoned work cannot be cancelled; observe its rejection so it is not
+    // reported as unhandled when no waiter is left.
+    ready.catch(() => {});
   }
-  return ready;
+  const current = ready;
+  return withDeadline(current, deadlineMs).catch((e) => {
+    if (ready === current) ready = undefined;
+    throw e;
+  });
 }
 
 // ---- Google sign-in: verify the ID token (RS256 JWT) against Google's public keys ----

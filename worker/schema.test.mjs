@@ -27,6 +27,17 @@ test('a stalled schema call rejects at the deadline instead of hanging', async (
   assert.ok(Date.now() - started < 2000, 'the deadline, not the client, ended the request');
 });
 
+test('a later caller gets its own deadline on a cached schema promise', async () => {
+  // The first caller starts the schema work and is abandoned (as when its client
+  // disconnects, taking its timer with it). The next caller must not inherit a
+  // never-settling promise with no deadline.
+  const DB = { prepare: () => ({}), batch: () => new Promise(() => {}) };
+  ensureSchema(env(DB), 300).catch(() => {});
+  const started = Date.now();
+  await assert.rejects(ensureSchema(env(DB), 25), (e) => e.dbTimeout === true);
+  assert.ok(Date.now() - started < 2000, 'the next request had a fresh deadline');
+});
+
 test('a database timeout becomes 503 with Retry-After', async () => {
   const DB = {
     prepare: () => ({}),
