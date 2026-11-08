@@ -693,31 +693,58 @@ const SEC_HEADERS = {
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
 };
 
+/** One structured line per server-side failure; never includes headers, cookies or bodies. */
+function logServerError(path, method, status, started, dbTimeout) {
+  console.error(JSON.stringify({
+    path,
+    method,
+    status,
+    ms: Date.now() - started,
+    dbTimeout: dbTimeout === true,
+  }));
+}
+
 export default {
   async fetch(req, env) {
-    // Fail closed when the session secret is missing or too short: without a strong secret
-    // the signed session cookie cannot be trusted. The reply is generic and never names the
-    // variable or its value.
-    if (!env.SESSION_SECRET || String(env.SESSION_SECRET).length < 32) {
-      return json({ error: 'Server error' }, 500);
-    }
-    const url = new URL(req.url);
-    // CSRF defense in depth: state-changing API calls must come from this site
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
-      const origin = req.headers.get('origin');
-      const site = req.headers.get('sec-fetch-site');
-      if ((origin && new URL(origin).host !== url.host) || (!origin && site && site !== 'same-origin' && site !== 'none')) {
-        return json({ error: 'Forbidden' }, 403);
+    const started = Date.now();
+    // Query strings can carry tokens, so only the pathname is logged. `state` lets the
+    // handler tell us whether a 503 came from a database deadline without inspecting
+    // (and consuming) the response body.
+    let path = '';
+    const state = {};
+    try {
+      path = new URL(req.url).pathname;
+      // Fail closed when the session secret is missing or too short: without a strong secret
+      // the signed session cookie cannot be trusted. The reply is generic and never names the
+      // variable or its value.
+      if (!env.SESSION_SECRET || String(env.SESSION_SECRET).length < 32) {
+        const res = json({ error: 'Server error' }, 500);
+        logServerError(path, req.method, res.status, started, false);
+        return res;
       }
+      const url = new URL(req.url);
+      // CSRF defense in depth: state-changing API calls must come from this site
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+        const origin = req.headers.get('origin');
+        const site = req.headers.get('sec-fetch-site');
+        if ((origin && new URL(origin).host !== url.host) || (!origin && site && site !== 'same-origin' && site !== 'none')) {
+          return json({ error: 'Forbidden' }, 403);
+        }
+      }
+      const res = await handle(req, guardEnv(env), state);
+      for (const [k, v] of Object.entries(SEC_HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v);
+      if (!res.headers.has('cache-control')) res.headers.set('cache-control', 'no-store');
+      if (res.status >= 500) logServerError(path, req.method, res.status, started, state.dbTimeout);
+      return res;
+    } catch (e) {
+      // The handler itself failed. Log the same shape, then let the runtime answer 500.
+      logServerError(path, req.method, 500, started, !!(e && e.dbTimeout));
+      throw e;
     }
-    const res = await handle(req, guardEnv(env));
-    for (const [k, v] of Object.entries(SEC_HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v);
-    if (!res.headers.has('cache-control')) res.headers.set('cache-control', 'no-store');
-    return res;
   },
 };
 
-const handle = async (req, env) => {
+const handle = async (req, env, state = {}) => {
   {
     const { pathname: path, protocol } = new URL(req.url);
     const secure = protocol === 'https:';
@@ -1308,7 +1335,10 @@ const handle = async (req, env) => {
       // A path with a stray "%" (e.g. /api/media/%zz) makes decodeURIComponent throw. That is a
       // bad request, not a server fault, so it must not surface as a 500.
       if (e instanceof URIError) return json({ error: 'Bad request' }, 400);
-      if (e && e.dbTimeout) return json({ error: 'Database temporarily unavailable' }, 503, { 'retry-after': '5' });
+      if (e && e.dbTimeout) {
+        state.dbTimeout = true;
+        return json({ error: 'Database temporarily unavailable' }, 503, { 'retry-after': '5' });
+      }
       const dup = String(e).includes('UNIQUE');
       return json({ error: dup ? 'That email already exists' : 'Server error' }, dup ? 409 : 500);
     }
