@@ -4,7 +4,7 @@ import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { invalidateCourse, nonceOk } from './index.js';
 import { pace } from './limits.js';
-import { db, r2, hashPw } from './harness.mjs';
+import { db, r2, hashPw, rate } from './harness.mjs';
 // The client decoder is the contract for the scrambled payload, so the test decodes the
 // real response with the real client code rather than a copy of the algorithm.
 import { decodeYt } from '../src/app/yt-cipher.ts';
@@ -27,7 +27,8 @@ const FILES = {
 };
 
 const { raw, DB } = db();
-const env = { DB, RESOURCES: r2(FILES), SESSION_SECRET: SECRET, ADMIN_EMAIL: OWNER, ADMIN_PASSWORD: OWNER_PW };
+const RATE = rate();
+const env = { DB, RESOURCES: r2(FILES), SESSION_SECRET: SECRET, ADMIN_EMAIL: OWNER, ADMIN_PASSWORD: OWNER_PW, RATE: RATE.RATE };
 
 const call = (path, { method = 'GET', headers = {}, body, e = env } = {}) =>
   worker.fetch(new Request(ORIGIN + path, { method, headers, body }), e);
@@ -131,12 +132,28 @@ test('a failed login reveals nothing about whether the email exists', async () =
 test('login throttling locks an email+IP after 8 failures', async () => {
   const email = await addUser();
   const ip = '10.0.0.9';
+  const calls = RATE.stats.calls;
   for (let i = 0; i < 8; i++) {
     const { res } = await login(email, { pw: 'nope', ip });
     assert.equal(res.status, 401, `attempt ${i + 1} is a normal rejection`);
   }
   const { res } = await login(email, { pw: 'nope', ip });
   assert.equal(res.status, 429, 'the 9th attempt is throttled');
+  assert.ok(RATE.stats.calls > calls, 'the Durable Object handled the attempts');
+  const fallback = raw.prepare('SELECT COUNT(*) c FROM attempts WHERE k = ?').get('ei:' + email + '|' + ip);
+  assert.equal(fallback.c, 0, 'D1 was not used while the limiter worked');
+});
+
+test('login throttling also caps one IP across many accounts', async () => {
+  const ip = '10.4.4.4';
+  // Unknown emails still count as failures: the per-IP key (40) is the only one that can
+  // trip here, because every email and email+IP pair is new.
+  for (let i = 0; i < 40; i++) {
+    const { res } = await login(`unknown${i}@example.com`, { pw: 'nope', ip });
+    assert.equal(res.status, 401, `attempt ${i + 1} is a normal rejection`);
+  }
+  const { res } = await login('unknown-final@example.com', { pw: 'nope', ip });
+  assert.equal(res.status, 429, 'the 41st attempt from one IP is throttled');
 });
 
 test('login throttling also counts failures per email, across many IPs', async () => {
@@ -282,6 +299,8 @@ test('media: the per-hour distinct-lesson limit answers 429', async () => {
     assert.notEqual((await call(`/api/media/Course/lesson-${i}.pdf`, { headers })).status, 429);
   }
   assert.equal((await call('/api/media/Course/lesson-21.pdf', { headers })).status, 429);
+  const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+  assert.equal(raw.prepare('SELECT COUNT(*) c FROM lesson_hits WHERE user_id = ?').get(uid).c, 0, 'the Durable Object counted, not D1');
 });
 
 test('media: repeating one lesson does not consume the per-hour distinct quota', async () => {
@@ -299,6 +318,16 @@ test('media: repeating one lesson does not consume the per-hour distinct quota',
   assert.equal((await call('/api/media/Course/extra-21.pdf', { headers })).status, 429, 'the 21st distinct lesson');
 });
 
+test('media: admins are exempt from the per-hour lesson limit', async () => {
+  const admin = await addUser({ admin: true });
+  const { cookie } = await login(admin, { ip: '10.6.6.6' });
+  const headers = browser(cookie);
+  for (let i = 0; i < 25; i++) {
+    const res = await call(`/api/media/Course/admin-${i}.pdf`, { headers });
+    assert.notEqual(res.status, 429, `admin request ${i + 1} was limited`);
+  }
+});
+
 test('media: a repeat request for the same lesson does not touch D1 for the hit counter', async () => {
   const email = await addUser();
   await enroll(email, 'Course');
@@ -310,6 +339,103 @@ test('media: a repeat request for the same lesson does not touch D1 for the hit 
   // The session and enrollment reads still happen (they are security checks), but the
   // lesson-hit INSERT and COUNT must not: an HLS burst would otherwise double D1 traffic.
   assert.ok(env.DB.stats.roundTrips <= 2, 'repeat used ' + env.DB.stats.roundTrips + ' D1 round trips');
+});
+
+// ---- fallback: a broken or stalled limiter must not break a request ----------------------
+
+function captureErrors() {
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => lines.push(args.map(String).join(' '));
+  return { lines, restore: () => { console.error = original; } };
+}
+
+test('a throwing limiter falls back to D1 and login still works', async () => {
+  const email = await addUser();
+  const ip = '10.7.7.7';
+  const logs = captureErrors();
+  RATE.stats.mode = 'throw';
+  try {
+    const { res } = await login(email, { ip });
+    assert.equal(res.status, 200, 'a good password still signs in');
+  } finally {
+    RATE.stats.mode = 'ok';
+    logs.restore();
+  }
+  assert.ok(logs.lines.length >= 1, 'the fallback was logged');
+  for (const line of logs.lines) {
+    const entry = JSON.parse(line);
+    assert.equal(entry.limiter, 'login');
+    assert.equal(entry.path, '/api/login');
+    assert.ok(entry.error, 'the log names the error type');
+    assert.ok(!line.includes(email), 'no email in the log');
+    assert.ok(!line.includes(ip), 'no IP in the log');
+  }
+});
+
+test('a throwing limiter still locks an email+IP through D1', async () => {
+  const email = await addUser();
+  const ip = '10.7.7.8';
+  const logs = captureErrors();
+  RATE.stats.mode = 'throw';
+  try {
+    for (let i = 0; i < 8; i++) {
+      const { res } = await login(email, { pw: 'nope', ip });
+      assert.equal(res.status, 401, `attempt ${i + 1}`);
+    }
+    assert.equal((await login(email, { pw: 'nope', ip })).res.status, 429, 'D1 still locks');
+  } finally {
+    RATE.stats.mode = 'ok';
+    logs.restore();
+  }
+  const row = raw.prepare('SELECT n FROM attempts WHERE k = ?').get('ei:' + email + '|' + ip);
+  assert.equal(row.n, 8, 'the D1 fallback recorded every failure');
+});
+
+test('a stalled limiter times out, falls back to D1 and the request still succeeds', async () => {
+  const email = await addUser();
+  const ip = '10.8.8.8';
+  const logs = captureErrors();
+  RATE.stats.mode = 'hang';
+  const started = Date.now();
+  let res;
+  try {
+    res = await call('/api/login', {
+      method: 'POST',
+      headers: { origin: ORIGIN, 'cf-connecting-ip': ip, 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password: STUDENT_PW }),
+      e: { ...env, RATE_TIMEOUT_MS: 25 },
+    });
+  } finally {
+    RATE.stats.mode = 'ok';
+    logs.restore();
+  }
+  assert.equal(res.status, 200, 'the request survived the stalled object');
+  assert.ok(Date.now() - started < 2000, 'the deadline, not the client, ended the wait');
+  assert.ok(logs.lines.length >= 1, 'the timeout was logged');
+});
+
+test('a throwing lesson limiter falls back to D1 lesson_hits', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email, { ip: '10.10.10.10' });
+  const logs = captureErrors();
+  RATE.stats.mode = 'throw';
+  let status;
+  try {
+    status = (await call('/api/media/Course/fallback.pdf', { headers: browser(cookie) })).status;
+  } finally {
+    RATE.stats.mode = 'ok';
+    logs.restore();
+  }
+  assert.notEqual(status, 429, 'the fallback did not invent a limit');
+  assert.notEqual(status, 500, 'the request answered normally');
+  const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+  assert.equal(raw.prepare('SELECT COUNT(*) c FROM lesson_hits WHERE user_id = ? AND lesson = ?').get(uid, 'Course/fallback.pdf').c, 1, 'D1 recorded the hit');
+  const entry = JSON.parse(logs.lines[0]);
+  assert.equal(entry.limiter, 'lessons');
+  assert.equal(entry.path, '/api/media');
+  assert.ok(!logs.lines.some((line) => line.includes(email)), 'no email in the log');
 });
 
 test('a cold course listing reads its three metadata tables in one batched round trip', async () => {

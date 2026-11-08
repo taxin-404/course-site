@@ -1,6 +1,9 @@
 // Test-only stand-ins for the Cloudflare bindings the Worker expects: a D1 adapter over
-// Node's built-in SQLite and a tiny in-memory R2. Imported by worker/*.test.mjs; never shipped.
+// Node's built-in SQLite, a tiny in-memory R2, and a Durable Object namespace that runs the
+// real RateLimiter class against an in-memory SQLite database. Imported by worker/*.test.mjs;
+// never shipped.
 import { DatabaseSync } from 'node:sqlite';
+import { RateLimiter } from './index.js';
 
 const enc = new TextEncoder();
 const b64 = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -142,6 +145,62 @@ export function d1(raw) {
 export function db() {
   const raw = new DatabaseSync(':memory:');
   return { raw, DB: d1(raw) };
+}
+
+/**
+ * A fake Durable Object namespace for RateLimiter. Each id gets its own in-memory SQLite
+ * database and one real RateLimiter instance, so tests exercise the object's SQL rather
+ * than a mock of it. `stats.mode` can be set to 'throw' or 'hang' to model a failing or
+ * stalled object; `raw(id)` gives a test the object's tables.
+ */
+export function rate() {
+  const objects = new Map();
+  const stats = {
+    calls: 0,
+    objects: 0,
+    mode: 'ok',
+    reset() { this.calls = 0; this.objects = 0; this.mode = 'ok'; },
+  };
+  const objectFor = (id) => {
+    let obj = objects.get(id);
+    if (!obj) {
+      const raw = new DatabaseSync(':memory:');
+      const ctx = {
+        storage: {
+          sql: {
+            exec(query, ...args) {
+              const stmt = raw.prepare(query);
+              if (/^\s*(select|with|pragma)\b/i.test(query)) {
+                const rows = stmt.all(...args);
+                return { toArray: () => rows, one: () => rows[0] };
+              }
+              stmt.run(...args);
+              return { toArray: () => [], one: () => undefined };
+            },
+          },
+        },
+      };
+      obj = { raw, limiter: new RateLimiter(ctx, {}) };
+      objects.set(id, obj);
+      stats.objects++;
+    }
+    return obj;
+  };
+  const RATE = {
+    idFromName: (name) => name,
+    get(id) {
+      if (stats.mode === 'throw') return { fetch: async () => { throw new Error('limiter down'); } };
+      if (stats.mode === 'hang') return { fetch: () => new Promise(() => {}) };
+      const obj = objectFor(id);
+      return {
+        fetch(input, init) {
+          stats.calls++;
+          return obj.limiter.fetch(new Request(new URL(input, 'https://limiter.internal'), init));
+        },
+      };
+    },
+  };
+  return { RATE, stats, raw: (id) => objects.get(id)?.raw };
 }
 
 /** PBKDF2 hash exactly as the Worker stores it (`salt.hash`, base64url), for seeding users. */
