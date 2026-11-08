@@ -145,6 +145,7 @@ Every lesson-shaped table is keyed by the R2 object key. The file manager keeps 
 | `GET /api/admin/youtube` | admin | `[{id, course, folder, lesson, yt}]` |
 | `POST /api/admin/youtube` | admin | `{course, folder?, lesson, link}`; `ytId` parses the link (`400` if not a YouTube link / course or lesson empty or containing `/`); upserts by path; `invalidateCourse()`; returns `{ok, id, yt, shadowed}` where `shadowed` is true when an R2 object already uses the id |
 | `DELETE /api/admin/youtube` | admin | `{id}`; deletes the row and `invalidateCourse()` |
+| `POST /api/admin/youtube/rename` | admin | `{id, name}`; a YouTube lesson's name is its key, so this moves the `youtube_lessons` row **and** its `comments`, `video_notes`, `pdf_notes`, `note_assets`, `watched`, `resources` and `content_order` rows to `<folder>/<name>`; video id and creation time are kept; `400` empty name or one containing `/`, `404` missing lesson, `409` if the target is another lesson or an R2 file; no-op when unchanged; `invalidateCourse()`; returns `{ok, id}` |
 | `POST /api/admin/users/<id>/courses` | admin | `{courses: []}`; replaces the user's enrollments |
 | `GET /api/admin/users` | admin | Users with `watched` count and `owner` flag |
 | `POST /api/admin/users` | admin | `{email, password, is_admin?, google_only?}`; `google_only` stores an unusable random password hash |
