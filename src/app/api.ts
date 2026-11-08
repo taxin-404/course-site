@@ -260,6 +260,9 @@ export class Api {
     return this.raw(`admin/${this.lessonPath(key, 'resources')}/pdf`, { method: 'POST', body: form });
   }
   deleteResource(id: number): Promise<unknown> { return this.req(`admin/resources/${id}`, undefined, 'DELETE'); }
+  updateResource(id: number, r: { title: string; url?: string; note?: string }): Promise<{ resource: ResourceItem }> {
+    return this.req(`admin/resources/${id}`, r, 'PATCH');
+  }
 
   mediaUrl(key: string): string {
     return '/api/media/' + key.split('/').map(encodeURIComponent).join('/');

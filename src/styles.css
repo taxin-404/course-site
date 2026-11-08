@@ -328,6 +328,10 @@ button.dc-link:hover:not(:disabled){background:transparent;text-decoration:under
 button.lr-del{flex:none;display:grid;place-items:center;width:28px;height:28px;min-height:28px;padding:0;background:transparent;color:var(--muted)}
 button.lr-del:hover:not(:disabled){background:var(--danger-soft);color:var(--danger)}
 .lr-del svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.lr-tools{display:flex;gap:.15rem;flex:none}
+button.lr-edit{flex:none;display:grid;place-items:center;width:28px;height:28px;min-height:28px;padding:0;background:transparent;color:var(--muted)}
+button.lr-edit:hover:not(:disabled){background:var(--hover);color:var(--primary)}
+.lr-edit svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .lr-muted{margin:0;color:var(--muted);font-size:13.5px}
 .lr-error{margin:0;color:var(--danger);font-size:13px}
 button.lr-link{padding:.1rem 0;background:transparent;color:var(--link);font-size:12.5px;font-weight:500;min-height:0}

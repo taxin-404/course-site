@@ -80,9 +80,14 @@ import { NotesControls } from './notes-controls';
                 @if (r.note) { <p class="lr-note">{{ r.note }}</p> }
               </div>
               @if (isAdmin()) {
-                <button type="button" class="lr-del" aria-label="Delete resource" title="Delete resource" (click)="remove(r)">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>
-                </button>
+                <span class="lr-tools">
+                  <button type="button" class="lr-edit" aria-label="Edit resource" title="Edit resource" (click)="edit(r)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
+                  </button>
+                  <button type="button" class="lr-del" aria-label="Delete resource" title="Delete resource" (click)="remove(r)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>
+                  </button>
+                </span>
               }
             </li>
           }
@@ -112,6 +117,41 @@ import { NotesControls } from './notes-controls';
           </div>
         }
       }
+
+      @if (editing(); as r) {
+        <div class="adm-scrim" (click)="closeEdit()"></div>
+        <div class="adm-dialog" role="dialog" aria-modal="true" aria-labelledby="lr-edit-title">
+          <header class="adm-dialog-top">
+            <h3 id="lr-edit-title">Edit resource</h3>
+            <button type="button" class="adm-close" aria-label="Close" (click)="closeEdit()">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+            </button>
+          </header>
+          <div class="adm-form">
+            <label class="field">
+              <span>Title</span>
+              <input #editTitleInput [value]="editTitle()" (input)="editTitle.set($any($event.target).value)" maxlength="120" autocomplete="off" spellcheck="false" />
+            </label>
+            @if (r.kind === 'link') {
+              <label class="field">
+                <span>Link</span>
+                <input type="url" [value]="editUrl()" (input)="editUrl.set($any($event.target).value)" maxlength="800" autocomplete="off" spellcheck="false" placeholder="https://..." />
+              </label>
+            } @else {
+              <p class="adm-muted sm">To replace the PDF, delete it and upload a new one.</p>
+            }
+            <label class="field">
+              <span>Note</span>
+              <input [value]="editNote()" (input)="editNote.set($any($event.target).value)" maxlength="300" autocomplete="off" spellcheck="false" placeholder="Optional note" />
+            </label>
+            @if (editError()) { <p class="files-error">{{ editError() }}</p> }
+          </div>
+          <footer class="adm-dialog-foot">
+            <button type="button" (click)="closeEdit()">Cancel</button>
+            <button type="button" class="p" [disabled]="editBusy()" (click)="saveEdit()">{{ editBusy() ? 'Saving...' : 'Save' }}</button>
+          </footer>
+        </div>
+      }
     </div>
   `,
 })
@@ -131,6 +171,13 @@ export class LessonResources {
   protected readonly mode = signal<'link' | 'pdf'>('link');
   protected readonly file = signal<File | null>(null);
   protected readonly opened = signal<ResourceItem | null>(null);
+  protected readonly editing = signal<ResourceItem | null>(null);
+  protected readonly editTitle = signal('');
+  protected readonly editUrl = signal('');
+  protected readonly editNote = signal('');
+  protected readonly editError = signal('');
+  protected readonly editBusy = signal(false);
+  protected readonly editTitleInput = viewChild<ElementRef<HTMLInputElement>>('editTitleInput');
   /** The viewer inside the modal, so its header can render the shared notes controls. */
   protected readonly pdfViewer = viewChild(PdfViewer);
   private readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
@@ -155,6 +202,8 @@ export class LessonResources {
         this.mode.set('link');
         this.error.set('');
         this.opened.set(null);
+        this.editing.set(null);
+        this.editError.set('');
         document.body.style.overflow = '';
         const input = this.fileInput()?.nativeElement;
         if (input) input.value = '';
@@ -167,9 +216,15 @@ export class LessonResources {
       if (this.opened() && this.backBtn()) this.backBtn()!.nativeElement.focus();
     });
 
+    effect(() => {
+      if (this.editing() && this.editTitleInput()) this.editTitleInput()!.nativeElement.focus();
+    });
+
     // Escape closes the modal; the viewer's own Escape handler only acts when expanded.
     const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && this.opened()) { e.preventDefault(); e.stopPropagation(); this.close(); }
+      if (e.key !== 'Escape') return;
+      if (this.editing()) { e.preventDefault(); e.stopPropagation(); this.closeEdit(); return; }
+      if (this.opened()) { e.preventDefault(); e.stopPropagation(); this.close(); }
     };
     document.addEventListener('keydown', esc);
     this.destroyRef.onDestroy(() => {
@@ -304,6 +359,41 @@ export class LessonResources {
       await this.load();
     } catch {
       this.error.set('Could not remove that resource.');
+    }
+  }
+
+  protected edit(r: ResourceItem): void {
+    this.editError.set('');
+    this.editing.set(r);
+    this.editTitle.set(r.title);
+    this.editUrl.set(r.kind === 'link' ? r.url : '');
+    this.editNote.set(r.note ?? '');
+    this.editBusy.set(false);
+  }
+
+  protected closeEdit(): void {
+    if (this.editBusy()) return;
+    this.editing.set(null);
+    this.editError.set('');
+  }
+
+  protected async saveEdit(): Promise<void> {
+    const r = this.editing();
+    if (!r || this.editBusy()) return;
+    this.editError.set('');
+    this.editBusy.set(true);
+    try {
+      await this.api.updateResource(r.id, {
+        title: this.editTitle().trim(),
+        ...(r.kind === 'link' ? { url: this.editUrl().trim() } : {}),
+        note: this.editNote().trim(),
+      });
+      this.editing.set(null);
+      await this.load();
+    } catch (e) {
+      this.editError.set(e instanceof Error ? e.message : 'Could not save that resource.');
+    } finally {
+      this.editBusy.set(false);
     }
   }
 }
