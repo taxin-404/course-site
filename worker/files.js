@@ -331,6 +331,7 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
   const to = cleanPath(rawTo);
   if (from === null || !from || to === null || !to) return bad('That name is not valid');
   if (from === to) return bad('That is the same place');
+  if (hasReservedSegment(to) && !hasReservedSegment(from)) return bad('RESOURCE is a reserved folder name');
 
   const single = await env.RESOURCES.head(from);
   const objects = single ? [single] : await listAll(env, from + '/');

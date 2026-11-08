@@ -1562,6 +1562,7 @@ const handle = async (req, env, state = {}) => {
           if (!yt) return json({ error: 'That is not a YouTube link' }, 400);
           const parts = [course, ...folder.split('/').map((s) => s.trim()).filter(Boolean), lesson];
           const id = parts.join('/');
+          if (hasReservedSegment(id)) return json({ error: 'RESOURCE is a reserved folder name' }, 400);
           await env.DB.prepare('INSERT INTO youtube_lessons (id, yt, created) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET yt = excluded.yt').bind(id, yt, Date.now()).run();
           invalidateCourse();
           const shadowed = !!(await env.RESOURCES.head(id));

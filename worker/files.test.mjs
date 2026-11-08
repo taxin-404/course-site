@@ -43,3 +43,8 @@ test('ancestorScopes lists folder prefixes nearest first', () => {
 test('childDirsFromIds never invents a RESOURCE folder from a YouTube id', () => {
   assert.deepEqual(childDirsFromIds('C', ['C/RESOURCE/x']), []);
 });
+
+test('isLessonKey keeps every RESOURCE file out of lesson handling', () => {
+  assert.equal(isLessonKey('C/RESOURCE/syllabus.txt'), false);
+  assert.equal(isLessonKey('C/RESOURCE/syllabus.md'), false);
+});

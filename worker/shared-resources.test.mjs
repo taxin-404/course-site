@@ -91,6 +91,33 @@ test('a folder named not-resources is not a RESOURCE folder (F2)', async () => {
   assert.deepEqual(shared.map((r) => [r.title, r.kind, r.scope]), [['syllabus', 'pdf', 'Course']]);
 });
 
+test('a YouTube lesson cannot be created under RESOURCE', async () => {
+  const res = await call('/api/admin/youtube', {
+    method: 'POST',
+    headers: { cookie: adminCookie, origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ course: 'Course', folder: 'Module 01/RESOURCE', lesson: 'Extra', link: 'dQw4w9WgXcQ' }),
+  });
+  assert.equal(res.status, 400);
+});
+
+test('moving an entry into RESOURCE is refused, but editing within RESOURCE is allowed', async () => {
+  const move = (from, to) => call('/api/admin/files/move', {
+    method: 'POST',
+    headers: { cookie: adminCookie, origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to }),
+  });
+  // A lesson file moved into RESOURCE is refused (today by the "must stay a lesson" guard).
+  assert.equal((await move('Course/Module 01/guide.md', 'Course/Module 01/RESOURCE/guide.md')).status, 400);
+  // F8: a whole section moved into RESOURCE must also be refused by the new reserved-name rule.
+  // A folder move skips the lesson guard, so this case genuinely exercises the new guard (and is
+  // the real RED: it succeeds today).
+  assert.equal((await move('Course/Module 02', 'Course/RESOURCE/Module 02')).status, 400);
+  // F7: seed a file inside RESOURCE at test time (the fake R2 bucket has put()) so Task 5's
+  // per-scope ordering assertions are not polluted by a second course-level file.
+  await env.RESOURCES.put('Course/RESOURCE/extra.txt', 'extra');
+  assert.equal((await move('Course/RESOURCE/extra.txt', 'Course/RESOURCE/extra-v2.txt')).status, 200);
+});
+
 test('a D1 timeout on the resources read fails cleanly, it does not hang', async () => {
   const { guardDb } = await import('./index.js');
   const hang = () => new Promise(() => {});
