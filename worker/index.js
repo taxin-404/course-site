@@ -552,29 +552,43 @@ const tooMany = () => json({ error: 'Too many attempts. Try again in 15 minutes.
 // One SQLite-backed object per key keeps the counts shared by every Worker instance without
 // a D1 round trip on the hot path (an HLS burst, especially). The D1 tables and functions
 // stay in place: a missing binding, an error or a stall all fall back to them.
-const RATE_TIMEOUT_MS = 8000;
+const RATE_TIMEOUT_MS = 2000;
 
 /**
  * The counter object. `login:*` stores one failure window (count + start time); `lessons:*`
- * stores the distinct lessons seen in an hour. Expired state is removed on access, so no
- * alarm is needed.
+ * stores the distinct lessons seen in an hour. Every request ensures a cleanup alarm exists,
+ * so an object abandoned by an attacker does not keep data or wake forever: the alarm drops
+ * expired rows and, when nothing is left, deletes all storage.
  */
 export class RateLimiter {
   constructor(state) {
+    this.state = state;
     this.sql = state.storage.sql;
+    this.setup();
+  }
+
+  setup() {
     this.sql.exec('CREATE TABLE IF NOT EXISTS login (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL, t INTEGER NOT NULL)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS hits (hour INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (hour, lesson))');
+  }
+
+  // Set the alarm only when none is scheduled, so a burst of requests does not keep pushing
+  // cleanup further away.
+  async ensureAlarm(at) {
+    if ((await this.state.storage.getAlarm()) === null) await this.state.storage.setAlarm(at);
   }
 
   async fetch(request) {
     const url = new URL(request.url);
     const now = Date.now();
     if (url.pathname === '/login/check') {
+      await this.ensureAlarm(now + LOCK_MS);
       const { max } = await request.json();
       const row = this.sql.exec('SELECT n, t FROM login WHERE id = 1').toArray()[0];
       return json({ locked: !!row && now - row.t < LOCK_MS && row.n >= Number(max) });
     }
     if (url.pathname === '/login/fail') {
+      await this.ensureAlarm(now + LOCK_MS);
       // Same arithmetic as the D1 upsert: a window older than LOCK_MS starts again at one,
       // otherwise the count grows and the window keeps its original start.
       this.sql.exec(
@@ -584,11 +598,8 @@ export class RateLimiter {
       this.sql.exec('DELETE FROM login WHERE t < ?', now - LOCK_MS * 4);
       return json({ ok: true });
     }
-    if (url.pathname === '/login/clear') {
-      this.sql.exec('DELETE FROM login');
-      return json({ ok: true });
-    }
     if (url.pathname === '/lesson') {
+      await this.ensureAlarm(now + 36e5);
       const hour = Number(url.searchParams.get('hour'));
       const lesson = String(url.searchParams.get('lesson') || '');
       this.sql.exec('DELETE FROM hits WHERE hour < ?', hour - 1);
@@ -597,6 +608,31 @@ export class RateLimiter {
       return json({ n: Number(row.c) });
     }
     return new Response('Not found', { status: 404 });
+  }
+
+  async alarm() {
+    const now = Date.now();
+    // A failure window is dead once its 15 minutes have passed; the next failure starts a
+    // fresh count anyway, so dropping the row changes no limit.
+    this.sql.exec('DELETE FROM login WHERE t <= ?', now - LOCK_MS);
+    const live = this.sql.exec('SELECT MIN(t) t FROM login').toArray()[0];
+    if (live && live.t !== null && live.t !== undefined) {
+      await this.state.storage.setAlarm(Number(live.t) + LOCK_MS);
+      return;
+    }
+    // No login state: keep only the current and previous hour buckets, as the access path does.
+    const hour = hourBucket(now);
+    this.sql.exec('DELETE FROM hits WHERE hour < ?', hour - 1);
+    const left = this.sql.exec('SELECT COUNT(*) c FROM hits').toArray()[0];
+    if (!left || !Number(left.c)) {
+      // Nothing remains: leave no rows or alarm behind, then recreate the empty schema so a
+      // request to this still-loaded instance keeps working.
+      await this.state.storage.deleteAlarm();
+      await this.state.storage.deleteAll();
+      this.setup();
+      return;
+    }
+    await this.state.storage.setAlarm(now + 36e5);
   }
 }
 
