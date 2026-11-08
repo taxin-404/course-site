@@ -27,6 +27,13 @@
 }
 
 /* ===== Base ===== */
+/* The logo's typeface, self-hosted from public/fonts so no third party is contacted. The
+   body stack (Inter/system) is the fallback, so the wordmark still reads before it loads. */
+@font-face{
+  font-family:"LT Superior";
+  src:url("/fonts/LTSuperior-Bold.ttf") format("truetype");
+  font-weight:700;font-style:normal;font-display:swap;
+}
 *{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 html{min-height:100%;background:var(--bg)}
 body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.45 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
@@ -87,7 +94,7 @@ app-root{display:flex;flex-direction:column;min-height:100vh}
    fills the viewport exactly. */
 app-root.no-head{--head:0px}
 header{display:flex;align-items:center;gap:.6rem;height:var(--head);flex:none;padding:0 clamp(.75rem,2vw,1.25rem);border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:20}
-.wordmark{font-size:15px;font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+.wordmark{display:flex;flex-direction:column;justify-content:center;font-family:"LT Superior",Inter,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;font-weight:700;line-height:1.03;letter-spacing:-.01em;white-space:nowrap}
 .head-search{position:relative;display:flex;align-items:center;gap:.4rem;flex:1;min-width:0;max-width:520px;margin:0 auto}
 .head-field{display:flex;align-items:center;gap:.4rem;flex:1;min-width:0;height:30px;padding:0 .3rem 0 .55rem;border:1px solid var(--border);border-radius:var(--r-surface);background:var(--bg);transition:border-color .12s}
 .head-field:focus-within{border-color:var(--primary)}

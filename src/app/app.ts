@@ -28,7 +28,7 @@ interface LessonHit {
       <!-- The header exists only on the course list and folder browser. -->
       @if (shell.headerVisible()) {
         <header [class.searching]="search.expanded()">
-          <h2 class="wordmark">Course</h2>
+          <h2 class="wordmark"><span>Course</span><span>Site.</span></h2>
 
           <div class="head-search">
             <div class="head-field">
