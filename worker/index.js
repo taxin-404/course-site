@@ -548,6 +548,106 @@ async function noteFail(env, keys) {
 }
 const tooMany = () => json({ error: 'Too many attempts. Try again in 15 minutes.' }, 429);
 
+// ---- Shared counters in a Durable Object, with the D1 code above as the fallback ----
+// One SQLite-backed object per key keeps the counts shared by every Worker instance without
+// a D1 round trip on the hot path (an HLS burst, especially). The D1 tables and functions
+// stay in place: a missing binding, an error or a stall all fall back to them.
+const RATE_TIMEOUT_MS = 8000;
+
+/**
+ * The counter object. `login:*` stores one failure window (count + start time); `lessons:*`
+ * stores the distinct lessons seen in an hour. Expired state is removed on access, so no
+ * alarm is needed.
+ */
+export class RateLimiter {
+  constructor(state) {
+    this.sql = state.storage.sql;
+    this.sql.exec('CREATE TABLE IF NOT EXISTS login (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL, t INTEGER NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS hits (hour INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (hour, lesson))');
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    const now = Date.now();
+    if (url.pathname === '/login/check') {
+      const { max } = await request.json();
+      const row = this.sql.exec('SELECT n, t FROM login WHERE id = 1').toArray()[0];
+      return json({ locked: !!row && now - row.t < LOCK_MS && row.n >= Number(max) });
+    }
+    if (url.pathname === '/login/fail') {
+      // Same arithmetic as the D1 upsert: a window older than LOCK_MS starts again at one,
+      // otherwise the count grows and the window keeps its original start.
+      this.sql.exec(
+        'INSERT INTO login (id, n, t) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET n = CASE WHEN ? - t > ? THEN 1 ELSE n + 1 END, t = CASE WHEN ? - t > ? THEN ? ELSE t END',
+        now, now, LOCK_MS, now, LOCK_MS, now,
+      );
+      this.sql.exec('DELETE FROM login WHERE t < ?', now - LOCK_MS * 4);
+      return json({ ok: true });
+    }
+    if (url.pathname === '/login/clear') {
+      this.sql.exec('DELETE FROM login');
+      return json({ ok: true });
+    }
+    if (url.pathname === '/lesson') {
+      const hour = Number(url.searchParams.get('hour'));
+      const lesson = String(url.searchParams.get('lesson') || '');
+      this.sql.exec('DELETE FROM hits WHERE hour < ?', hour - 1);
+      this.sql.exec('INSERT OR IGNORE INTO hits (hour, lesson) VALUES (?, ?)', hour, lesson);
+      const row = this.sql.exec('SELECT COUNT(*) c FROM hits WHERE hour = ?', hour).toArray()[0];
+      return json({ n: Number(row.c) });
+    }
+    return new Response('Not found', { status: 404 });
+  }
+}
+
+function rateStub(env, name) {
+  const ns = env.RATE;
+  if (!ns || typeof ns.idFromName !== 'function' || typeof ns.get !== 'function') return null;
+  return ns.get(ns.idFromName(name));
+}
+
+/** One call to a limiter object, bounded by the same kind of deadline as the D1 guard. */
+async function rateCall(env, name, path, body = {}) {
+  const stub = rateStub(env, name);
+  if (!stub) throw new Error('RATE binding is not configured');
+  const res = await withDeadline(stub.fetch('https://limiter.internal' + path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }), Number(env.RATE_TIMEOUT_MS || RATE_TIMEOUT_MS));
+  if (!res.ok) throw new Error('Rate limiter answered ' + res.status);
+  return res.json();
+}
+
+// The key itself can hold an email, an IP or a user id, so only the route, the limiter and
+// the error type are logged. One line per real fallback event.
+function logLimiterFallback(path, limiter, e) {
+  console.error(JSON.stringify({
+    path,
+    limiter,
+    error: e && e.dbTimeout ? 'TimeoutError' : (e && e.name) || 'Error',
+  }));
+}
+
+async function loginLocked(env, keys, path) {
+  try {
+    const checks = await Promise.all(keys.map(([, max, name]) => rateCall(env, name, '/login/check', { max })));
+    return checks.some((r) => r && r.locked);
+  } catch (e) {
+    logLimiterFallback(path, 'login', e);
+    return locked(env, keys);
+  }
+}
+
+async function loginFail(env, keys, path) {
+  try {
+    await Promise.all(keys.map(([, , name]) => rateCall(env, name, '/login/fail')));
+  } catch (e) {
+    logLimiterFallback(path, 'login', e);
+    await noteFail(env, keys);
+  }
+}
+
 // ---- Media protection ----
 // 1) Browsers tell us who is asking via Sec-Fetch-* headers. Downloaders (curl, wget, yt-dlp, most download
 //    managers) do not send them, and other websites cannot make a browser send "same-origin".
@@ -559,18 +659,46 @@ function mediaRequestOk(req, env) {
   return site === 'same-origin' && ['video', 'audio', 'empty', 'track'].includes(dest);
 }
 // 2) Scraping a whole course touches many lessons quickly. Cap distinct lessons per user
-//    per hour in D1, so the count is shared by every Worker instance. (The old in-memory
-//    Map lived in one isolate, so a scrape spread across isolates could dodge it.)
+//    per hour in a Durable Object (`lessons:<userId>`), so the count is shared by every
+//    Worker instance. The old D1 table remains the fallback (scrapingD1, below).
 const lessonLimit = (env) => Number(env.MAX_LESSONS_PER_HOUR || 20);
-// A plain media request — and every HLS segment is one — must not cost a D1 write and read
-// each time. Within one Worker instance, remember which (user, hour, lesson) hits we already
-// recorded and the count we last read, so a segment burst collapses to near-zero D1 traffic.
-// Both memos are advisory: D1 stays the source of truth across instances, so the cap can be
-// lax by at most COUNT_TTL_MS on another instance, never bypassed for long.
+// A plain media request — and every HLS segment is one — must not cost a limiter call each
+// time. Within one Worker instance, remember which (user, hour, lesson) hits we already
+// recorded and the count we last read, so a segment burst collapses to near-zero traffic.
+// Both memos are advisory: the object stays the source of truth across instances, so the
+// cap can be lax by at most COUNT_TTL on another instance, never bypassed for long.
+const doHitMemo = new Set();
+const doCountMemo = new Map();
+const COUNT_TTL = 3000;
+async function scraping(env, u, key, path = '/api/media') {
+  if (u.is_admin) return false;
+  const hour = hourBucket(Date.now());
+  const lesson = lessonOf(key);
+  const hitKey = `${u.id}|${hour}|${lesson}`;
+  const countKey = `${u.id}|${hour}`;
+  const seen = doCountMemo.get(countKey);
+  if (seen && Date.now() - seen.at <= COUNT_TTL && doHitMemo.has(hitKey)) {
+    return seen.n > lessonLimit(env);
+  }
+  let n;
+  try {
+    const body = await rateCall(env, `lessons:${u.id}`, `/lesson?hour=${hour}&lesson=${encodeURIComponent(lesson)}`);
+    n = Number(body.n);
+  } catch (e) {
+    logLimiterFallback(path, 'lessons', e);
+    return scrapingD1(env, u, key);
+  }
+  if (doHitMemo.size > 5000) doHitMemo.clear();
+  doHitMemo.add(hitKey);
+  if (doCountMemo.size > 2000) doCountMemo.clear();
+  doCountMemo.set(countKey, { n, at: Date.now() });
+  return n > lessonLimit(env);
+}
+// The D1 fallback keeps its own memos: a hit recorded by the object is not a row in
+// lesson_hits, so sharing the set above would let a failing object skip the D1 write.
 const hitMemo = new Set();
 const countMemo = new Map();
-const COUNT_TTL = 3000;
-async function scraping(env, u, key) {
+async function scrapingD1(env, u, key) {
   if (u.is_admin) return false;
   const hour = hourBucket(Date.now());
   const lesson = lessonOf(key);
@@ -847,13 +975,13 @@ const handle = async (req, env, state = {}) => {
       await ensureSchema(env);
       if (path === '/api/login/google' && m === 'POST') {
         if (!env.GOOGLE_CLIENT_ID) return json({ error: 'Google sign-in is not set up' }, 503);
-        const ip = ['i:' + ipOf(req), 40];
-        if (await locked(env, [ip])) return tooMany();
+        const ip = ['i:' + ipOf(req), 40, 'login:' + ipOf(req)];
+        if (await loginLocked(env, [ip], path)) return tooMany();
         const { credential } = await req.json();
         const c = await verifyGoogle(String(credential || ''), env).catch(() => null);
-        if (!c) { await noteFail(env, [ip]); return json({ error: 'Google sign-in failed' }, 401); }
+        if (!c) { await loginFail(env, [ip], path); return json({ error: 'Google sign-in failed' }, 401); }
         // The token must carry the nonce this browser was issued, or it was minted elsewhere.
-        if (!nonceOk(c.nonce, nonceOf(req))) { await noteFail(env, [ip]); return json({ error: 'Google sign-in failed' }, 401); }
+        if (!nonceOk(c.nonce, nonceOf(req))) { await loginFail(env, [ip], path); return json({ error: 'Google sign-in failed' }, 401); }
         let u = await env.DB.prepare('SELECT id, email, google_sub, ver FROM users WHERE google_sub = ?').bind(c.sub).first();
         if (!u) {
           u = await env.DB.prepare('SELECT id, email, google_sub, ver FROM users WHERE email = ?').bind(c.email.toLowerCase()).first();
@@ -870,8 +998,9 @@ const handle = async (req, env, state = {}) => {
         // looser per-IP one (one machine guessing many accounts), and a per-email one so a
         // guess spread across many IPs still slows down. The per-email cap is high enough that
         // only a real attack reaches it, and it expires with the same 15-minute window.
-        const keys = [['ei:' + em + '|' + ipOf(req), 8], ['i:' + ipOf(req), 40], ['e:' + em, 30]];
-        if (await locked(env, keys)) return tooMany();
+        const ip = ipOf(req);
+        const keys = [['ei:' + em + '|' + ip, 8, 'login:' + em + '|' + ip], ['i:' + ip, 40, 'login:' + ip], ['e:' + em, 30, 'login:' + em]];
+        if (await loginLocked(env, keys, path)) return tooMany();
         const pass = String(password || '');
         const u = await env.DB.prepare('SELECT id, pass, ver FROM users WHERE email = ?').bind(em).first();
         // Spend one PBKDF2 derive even when the email is unknown, and when the account has no
@@ -880,7 +1009,7 @@ const handle = async (req, env, state = {}) => {
         let ok = false;
         if (u && u.pass.includes('.')) ok = await checkPw(pass, u.pass);
         else await derive(pass, crypto.getRandomValues(new Uint8Array(16)));
-        if (!ok) { await noteFail(env, keys); return json({ error: 'Wrong email or password' }, 401); }
+        if (!ok) { await loginFail(env, keys, path); return json({ error: 'Wrong email or password' }, 401); }
         return json({ ok: true }, 200, { 'set-cookie': await startSession(env, u, secure) });
       }
       if (path === '/api/logout' && m === 'POST') return json({ ok: true }, 200, { 'set-cookie': clearCookie(secure) });
@@ -927,7 +1056,7 @@ const handle = async (req, env, state = {}) => {
         const course = (await listCourse(env)).find((c) => c.title === courseOf(key));
         const lesson = course && course.sections.flatMap((s) => s.lessons).find((l) => l.id === key);
         if (!lesson || lesson.kind !== 'youtube' || !lesson.yt) return json({ error: 'Not found' }, 404);
-        if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
+        if (await scraping(env, u, key, '/api/lesson')) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
         return json({ yt: scramble(await sessionKey(env.SESSION_SECRET, u.id, u.sid), lesson.yt) }, 200, { 'cache-control': 'no-store' });
       }
       // Position numbers the student browser shows: path -> number. A course-level row

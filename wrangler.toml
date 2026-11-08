@@ -22,3 +22,13 @@ database_name = "course-db-apac"
 [[r2_buckets]]
 binding = "RESOURCES"
 bucket_name = "course-sourse"
+
+# Shared login and per-hour lesson counters. One SQLite-backed object per key, so the state
+# is shared by every Worker instance; D1 keeps the old tables as the fallback.
+[[durable_objects.bindings]]
+name = "RATE"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]
