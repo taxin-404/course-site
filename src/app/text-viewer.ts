@@ -19,6 +19,31 @@ type State = 'loading' | 'ready' | 'error';
       <pre class="tv-body tv-txt">{{ body() }}</pre>
     }
   `,
+  styles: `
+    /* The host owns scrolling so the viewer sits in a flex column (the resource modal
+       and the upcoming lesson body) and long files stay reachable. flex:1 is inert
+       when the host is not a flex item. */
+    :host {
+      display: block;
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+    .tv-body {
+      margin: 0;
+      padding: 1rem 1.25rem;
+    }
+    .tv-txt {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    /* Markdown is injected via [innerHTML]; emulated encapsulation does not reach those
+       nodes, so the scroll container is the .tv-md element itself, not the inner <pre>. */
+    .tv-md {
+      overflow-x: auto;
+    }
+  `,
 })
 export class TextViewer {
   private readonly api = inject(Api);
