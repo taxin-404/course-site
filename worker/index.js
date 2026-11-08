@@ -1007,6 +1007,21 @@ const handle = async (req, env, state = {}) => {
       const nonce = /^[A-Za-z0-9_-]{16,}$/.test(existing) ? existing : b64(crypto.getRandomValues(new Uint8Array(16)));
       return json({ googleClientId: env.GOOGLE_CLIENT_ID || '', nonce }, 200, { 'set-cookie': nonceCookie(nonce, secure) });
     }
+    // Uptime probe: one guarded query, no schema bootstrap and no session, so it answers
+    // even when D1 is down. The body is only `ok` true/false; a stall is a 503, never a hang.
+    if (path === '/api/health' && (m === 'GET' || m === 'HEAD')) {
+      const headers = { 'cache-control': 'no-store' };
+      const head = m === 'HEAD';
+      try {
+        await env.DB.prepare('SELECT 1 AS ok').first();
+        return head ? new Response(null, { status: 200, headers }) : json({ ok: true }, 200, headers);
+      } catch (e) {
+        if (e && e.dbTimeout) state.dbTimeout = true;
+        return head
+          ? new Response(null, { status: 503, headers: { ...headers, 'retry-after': '5' } })
+          : json({ ok: false }, 503, { ...headers, 'retry-after': '5' });
+      }
+    }
     try {
       await ensureSchema(env);
       if (path === '/api/login/google' && m === 'POST') {
