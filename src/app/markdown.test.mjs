@@ -42,3 +42,17 @@ test('markdown emphasis can span a link', () => {
   const italic = renderMarkdown('*see [the docs](https://e.com)*');
   assert.match(italic, /<em>see <a href="https:\/\/e\.com" target="_blank" rel="noopener noreferrer">the docs<\/a><\/em>/);
 });
+
+test('markdown normalizes CRLF and lone CR line endings', () => {
+  const out = renderMarkdown('# Title\r\n\r\nbody line\r\n');
+  assert.ok(!out.includes('\r'), `CRLF leaked a carriage return: ${JSON.stringify(out)}`);
+  assert.match(out, /<h1[^>]*>Title<\/h1>/);
+  assert.match(out, /<p>body line<\/p>/);
+  assert.ok(!renderMarkdown('one\rtwo').includes('\r'), 'a lone CR is normalized');
+});
+
+test('markdown renders blockquotes, horizontal rules and ordered lists', () => {
+  assert.match(renderMarkdown('> quoted line\n> second'), /<blockquote>quoted line second<\/blockquote>/);
+  assert.match(renderMarkdown('---'), /<hr>/);
+  assert.match(renderMarkdown('1. first\n2. second'), /<ol>[\s\S]*<li>first<\/li>[\s\S]*<li>second<\/li>[\s\S]*<\/ol>/);
+});

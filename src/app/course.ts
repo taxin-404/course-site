@@ -126,7 +126,6 @@ type View = CourseView;
               } @else if (l.kind === 'txt' || l.kind === 'md') {
                 @defer (on immediate) {
                   <app-text-viewer [key]="l.id" [md]="l.kind === 'md'" />
-                  <app-lesson-panel data-scroll-top [lesson]="l" />
                 } @placeholder {
                   <div class="defer-fill" aria-live="polite">Loading lesson...</div>
                 } @loading {
@@ -134,6 +133,7 @@ type View = CourseView;
                 } @error {
                   <div class="defer-fill" role="alert">Could not load the lesson. Check your connection and try again.</div>
                 }
+                <app-lesson-panel data-scroll-top [lesson]="l" />
               } @else {
                 @defer (on immediate) {
                   @if (l.kind === 'youtube') {

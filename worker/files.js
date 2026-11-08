@@ -426,10 +426,11 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
     .filter((p) => isLessonKey(p.from) && isLessonKey(p.to))
     .flatMap((p) => LESSON_ROWS.map((sql) => env.DB.prepare(sql).bind(p.to, p.from)));
   // A shared RESOURCE PDF is not a lesson key, so its private notes and pasted images need
-  // their own move: only a PDF carries annotations, and only when it stays inside a RESOURCE
-  // folder (a move that leaves RESOURCE is already refused above).
+  // their own move: only a PDF carries annotations, and those annotations follow it wherever
+  // it goes. A move *into* RESOURCE is refused above, but a move *out* of RESOURCE is allowed,
+  // so carry the rows whenever the SOURCE is a reserved .pdf, regardless of the destination.
   for (const p of pairs) {
-    if (!hasReservedSegment(p.from) || !hasReservedSegment(p.to) || !/\.pdf$/i.test(p.from)) continue;
+    if (!hasReservedSegment(p.from) || !/\.pdf$/i.test(p.from)) continue;
     statements.push(env.DB.prepare('UPDATE OR REPLACE pdf_notes SET lesson = ? WHERE lesson = ?').bind(p.to, p.from));
     statements.push(env.DB.prepare('UPDATE OR REPLACE note_assets SET lesson = ? WHERE lesson = ?').bind(p.to, p.from));
   }

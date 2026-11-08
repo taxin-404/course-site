@@ -180,3 +180,22 @@ test('a shared PDF keeps its notes when it is renamed inside RESOURCE', async ()
   const after = await call('/api/notes/' + encodeURIComponent('Course/RESOURCE/renamed.pdf'), { headers: { cookie } });
   assert.deepEqual((await after.json()).data, [{ id: 'z', page: 2 }]);
 });
+
+test('a shared PDF moved out of RESOURCE takes its notes with it', async () => {
+  // Seed just-in-time so test order cannot matter (a later/earlier test renames syllabus.pdf).
+  await env.RESOURCES.put('Course/RESOURCE/moved.pdf', '%PDF-1.4\nmoved');
+  const put = await call('/api/notes/' + encodeURIComponent('Course/RESOURCE/moved.pdf'), {
+    method: 'PUT',
+    headers: { cookie, origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ data: [{ id: 'out', page: 7 }] }),
+  });
+  assert.equal(put.status, 200);
+  const mv = await call('/api/admin/files/move', {
+    method: 'POST',
+    headers: { cookie: adminCookie, origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ from: 'Course/RESOURCE/moved.pdf', to: 'Course/Module 01/moved.pdf', kind: 'file' }),
+  });
+  assert.equal(mv.status, 200);
+  const after = await call('/api/notes/' + encodeURIComponent('Course/Module 01/moved.pdf'), { headers: { cookie } });
+  assert.deepEqual((await after.json()).data, [{ id: 'out', page: 7 }]);
+});

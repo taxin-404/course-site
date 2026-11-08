@@ -17,7 +17,7 @@
 - **Never touch secrets.** Do not read or write `.dev.vars`, Worker secrets, or any credential material.
 - Keep `npm test`, `npm run typecheck`, `npm run build` and `npm run check:scripts` green after every task.
 - Update `docs/CHANGELOG.md` and `docs/HANDOFF.md` (Task 11).
-- **Caps:** PDF resources 25 MB; TXT/MD resources and text lessons 2 MB.
+- **Caps:** PDF resources 25 MB; TXT/MD resources 2 MB. (Text *lessons* are not capped — the spec caps only resources, §5/§11. Ruling F11.)
 - **Reserved folder name is exactly `RESOURCE`, matched case-insensitively per path segment.** `resource` and `Resource` also match; `my-resources`, `RESOURCES2` do not.
 - **`.markdown` is treated as kind `md` everywhere** (resources, lessons, serving). `.text` is treated as `txt`.
 - **Every PDF is annotatable** — lesson PDFs, uploaded resource PDFs, and shared `RESOURCE` PDFs. TXT/MD are view-only.

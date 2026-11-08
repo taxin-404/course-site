@@ -15,6 +15,7 @@ const STUDENT_PW = 'student-pass-1';
 // One course with a shared RESOURCE folder, a video, a Markdown and a text lesson, plus an
 // HLS segment that must never appear as a lesson of its own.
 const FILES = {
+  'RESOURCE/global.txt': 'top level',
   'Course/RESOURCE/syllabus.pdf': '%PDF-1.4\nsyllabus',
   'Course/Module 01/Module 01 - Intro.mp4': new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]),
   'Course/Module 01/guide.md': '# Guide\n\nRead me.',
@@ -77,6 +78,7 @@ test('listCourse lists text/markdown lessons and skips the RESOURCE folder', asy
   assert.deepEqual(lessons.filter((l) => l.kind === 'txt').map((l) => l.id), ['Course/Module 01/notes.txt']);
   assert.ok(!lessons.some((l) => l.id.includes('RESOURCE')), 'shared files are not lessons');
   assert.ok(!lessons.some((l) => l.id.endsWith('clip.ts')), 'HLS segments are not lessons');
+  assert.ok(!data.some((c) => c.title === 'RESOURCE'), 'a top-level RESOURCE folder is not a course');
 });
 
 test('serve returns text and markdown with the right content type', async () => {
@@ -133,4 +135,18 @@ test('GET reports real kinds; PATCH ignores a url on a file row; DELETE removes 
   const del = await call(`/api/admin/resources/${txt.id}`, { method: 'DELETE', headers: { cookie: adminCookie, origin: ORIGIN } });
   assert.equal(del.status, 200);
   assert.equal(env.RESOURCES.has(key), false, 'the R2 object is gone');
+});
+
+test('deleting a non-pdf resource does not touch pdf_notes', async () => {
+  const res = await call('/api/admin/lesson/Course%2FModule%2001%2Fguide.md/resources/file',
+    { method: 'POST', headers: { cookie: adminCookie, origin: ORIGIN }, body: fileForm('pin.txt', 'pin') });
+  assert.equal(res.status, 200);
+  const { resource } = await res.json();
+  // Seed a pdf_notes row keyed by this non-pdf resource's file_key directly.
+  await env.DB.prepare('INSERT OR REPLACE INTO pdf_notes (user_id, lesson, data, updated) VALUES (?, ?, ?, ?)')
+    .bind(1, resource.url, '[]', Date.now()).run();
+  const del = await call(`/api/admin/resources/${resource.id}`, { method: 'DELETE', headers: { cookie: adminCookie, origin: ORIGIN } });
+  assert.equal(del.status, 200);
+  const n = (await env.DB.prepare('SELECT COUNT(*) n FROM pdf_notes WHERE lesson = ?').bind(resource.url).first()).n;
+  assert.equal(Number(n), 1, 'a non-pdf delete does not touch pdf_notes');
 });

@@ -84,7 +84,7 @@ const listItem = (tag: 'ul' | 'ol', items: string[]): string =>
 
 /** Render Markdown `src` to a safe HTML string. Pure: no state, no dependencies. */
 export function renderMarkdown(src: string): string {
-  const lines = escapeHtml(src).split('\n');
+  const lines = escapeHtml(src.replace(/\r\n?/g, '\n')).split('\n');
   const out: string[] = [];
   let i = 0;
 
