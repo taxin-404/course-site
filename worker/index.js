@@ -1,4 +1,4 @@
-import { handleFiles, hasReservedSegment, LESSON_ROWS } from './files.js';
+import { handleFiles, hasReservedSegment, isReservedDir, ancestorScopes, LESSON_ROWS } from './files.js';
 import { BANNER_TYPES, bannerKeys } from './banners.js';
 import { lessonOf, hourBucket, publicLesson, pace } from './limits.js';
 import { sessionKey, scramble } from './yt-cipher.mjs';
@@ -523,6 +523,52 @@ const RES_CONTENT_TYPE = {
 function resourceKindOf(filename) {
   const m = /\.([a-z0-9]+)$/i.exec(String(filename || '').trim());
   return (m && RES_KINDS[m[1].toLowerCase()]) || null;
+}
+const basename = (key) => String(key).slice(String(key).lastIndexOf('/') + 1);
+
+/**
+ * The resource files sitting in any ancestor RESOURCE folder of `key`, nearest scope first.
+ * R2 has no folder table, so each ancestor is listed with a `/` delimiter and the immediate
+ * child whose name is the reserved folder is the one to descend into. Every matching file
+ * becomes a synthetic, read-only row that mirrors a real resource row.
+ */
+async function sharedResourcesFor(env, key) {
+  const out = [];
+  for (const scope of ancestorScopes(key)) {
+    if (hasReservedSegment(scope)) continue; // never inherit through a RESOURCE folder itself
+    // Find the reserved child folder directly under this scope, if any.
+    let resourcePrefix = null;
+    let cursor;
+    do {
+      const r = await env.RESOURCES.list({ prefix: scope + '/', delimiter: '/', cursor, limit: 1000 });
+      for (const p of r.delimitedPrefixes || []) {
+        if (isReservedDir(p.split('/').filter(Boolean).pop())) { resourcePrefix = p; break; }
+      }
+      cursor = r.truncated ? r.cursor : undefined;
+    } while (cursor && !resourcePrefix);
+    if (!resourcePrefix) continue;
+
+    const label = scope.split('/').filter(Boolean).pop();
+    let fileCursor;
+    do {
+      const r = await env.RESOURCES.list({ prefix: resourcePrefix, cursor: fileCursor, limit: 1000 });
+      for (const o of r.objects) {
+        const kind = resourceKindOf(o.key);
+        if (!kind) continue;
+        out.push({
+          id: 'shared:' + o.key,
+          title: basename(o.key).replace(/\.[^.]+$/, ''),
+          url: o.key,
+          note: null,
+          kind,
+          shared: true,
+          scope: label,
+        });
+      }
+      fileCursor = r.truncated ? r.cursor : undefined;
+    } while (fileCursor);
+  }
+  return out;
 }
 // Lesson-scoped features (comments, notes, resources) all ask the same question: does this
 // key exist in the bucket, and may this user see the course it belongs to?
@@ -1369,6 +1415,9 @@ const handle = async (req, env, state = {}) => {
               kind,
             };
           });
+          // Files in an ancestor RESOURCE folder are read-only and belong to every lesson
+          // beneath them, so they follow the lesson's own rows (nearest scope first).
+          resources.push(...(await sharedResourcesFor(env, key)));
           return json({ resources });
         }
       }
