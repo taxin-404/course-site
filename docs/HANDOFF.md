@@ -38,9 +38,9 @@ A private video course site for a small cohort (about 6 students, growing to a f
 | Resource PDFs live in `<Course>/_resources/<uuid>.pdf`, not next to the lesson | A resource is a file the lesson links to, not a lesson. Hiding the folder from `listCourse` and the file manager keeps it out of the course tree, while the existing media/notes routes and enrollment checks work unchanged. One folder per course also gives course rename and cross-course moves an obvious rule: `file_key` is rewritten with the lesson, and a cross-course move copies the PDF to the destination course's `_resources`. |
 | Binding renamed `VIDEOS` → `RESOURCES` | It now holds PDFs and arbitrary files too. The bucket name `<bucket-name>` is unchanged (R2 buckets cannot be renamed). |
 | D1 for users and progress only | Small relational data; progress keyed by R2 object key. |
-| Schema created lazily by the Worker | The Git deploy has no place to run migrations before the database exists. `CREATE TABLE IF NOT EXISTS` runs once per isolate. |
+| Schema created lazily by the Worker, behind a version gate | The Git deploy has no place to run migrations before the database exists, so the Worker still creates the schema itself. `schema_meta (k, v)` records `schema` = `SCHEMA_VERSION`: a cold isolate spends one `SELECT k, v FROM schema_meta WHERE k IN ('schema', 'admin_pw')` and, when the version matches, skips every `CREATE TABLE`, the `migrate()` probes and the migration queries — only `seedAdmin`'s one owner read remains (two D1 calls total). On first run, a version bump, a missing row or a missing table it runs the idempotent `SCHEMA` batch, then `migrate()`, then `seedAdmin()`, and writes the version **last**, so a failed step can never activate the fast path. **Bump `SCHEMA_VERSION` in `worker/index.js` whenever `SCHEMA` or `MIGRATIONS` changes**: `worker/schema.test.mjs` pins a SHA-256 of both lists and fails, telling you to bump, if the DDL moved without it. There is still no manual `wrangler d1` migration step. |
 | `wrangler.toml` bindings without IDs | Cloudflare provisions the D1 database and R2 bucket on the first Git deploy. Bucket is named `<bucket-name>` (spelling kept on purpose). |
-| First admin from secrets | `ADMIN_EMAIL` + `ADMIN_PASSWORD` are read on every cold start; the user is created if missing and forced to admin. It replaced the old `/api/setup` + `SETUP_KEY` flow. |
+| First admin from secrets | `ADMIN_EMAIL` + `ADMIN_PASSWORD` are read on every cold start; the user is created if missing and forced to admin. It replaced the old `/api/setup` + `SETUP_KEY` flow. The SHA-256 fingerprint of `ADMIN_PASSWORD` stored in `schema_meta` (`admin_pw`) is a change detector, not a credential: a matching cold start compares it and skips the PBKDF2 derive, so the password is hashed only when the owner row is missing or the secret changed. Removing the secret writes the unusable marker `!` (Google-only), and changing it replaces the hash. |
 | Admin panel inside the app | Replaced the single "Add student" dialog. No router; `app.ts` toggles between `<app-course>` and `<app-admin>`. |
 | Angular 22 (upgraded from 21) | The reason to hold at 21 (Workers Builds had an older Node) is gone: the build image now defaults to Node 24, which Angular 22 supports. Angular 22 makes `OnPush` the default change detection strategy, so the `ng update` migration added `ChangeDetectionStrategy.Eager` to every existing component to keep behaviour unchanged; new components can use the OnPush default. |
 | No router, no UI library | One screen after login; fewer dependencies. |
@@ -114,6 +114,7 @@ course_meta (course TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '')   --
 resources (id INTEGER PK, lesson TEXT, title TEXT, url TEXT, note TEXT, created_by INTEGER, created INTEGER, kind TEXT, file_key TEXT)   -- kind = 'link' (default) or 'pdf'; for PDFs `url` is empty and `file_key` is the R2 key
 youtube_lessons (id TEXT PRIMARY KEY, yt TEXT NOT NULL, created INTEGER NOT NULL)   -- id = lesson path "<Course>/<Folder>/<Name>", yt = YouTube video id; created in migrate() and seeded once from worker/youtube.js
 attempts (k TEXT PRIMARY KEY, n INTEGER, t INTEGER)   -- login throttling
+schema_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)   -- bootstrap state: k='schema' → SCHEMA_VERSION, k='admin_pw' → SHA-256 fingerprint of ADMIN_PASSWORD; read once per cold isolate, version written last after a successful full bootstrap
 ```
 
 Every lesson-shaped table is keyed by the R2 object key. The file manager keeps them attached: a rename/move rewrites `lesson` in `comments`, `video_notes`, `pdf_notes`, `watched` and `resources` in the same operation, a course rename also rewrites `enrollments.course` and `course_meta.course`, and a delete removes all of a lesson's rows (a course delete also removes its enrollments and its `course_meta` row). `content_order` follows the same rule: a rename keeps every position, a move to a different parent drops only the moved root's number (its children keep theirs), and a delete removes the path and its whole subtree. A folder move also carries its `youtube_lessons` rows and their positions; a folder delete removes them.
@@ -181,7 +182,7 @@ Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSW
 - Cookie `s=<base64url(JSON{uid, v, sid, exp})>.<base64url(HMAC-SHA256 with SESSION_SECRET)>`, `HttpOnly; Secure; SameSite=Strict`, 7 days.
 - Each request re-reads the user row, so deleting a user ends their sessions immediately.
 - `users.sid` is the account's current session id (nullable). A student cookie is valid only while its `sid` matches the row, so an account has one live student session and a new login signs the old device out; admins (`is_admin = 1`, including the owner) skip the check. The client clears its session on any `401` (`Api.signOutLocal`, internal) and revalidates on `window focus` / `document visibilitychange` (`Api.refreshMe`). This stops account sharing via a new login (password or Google); it does **not** stop a student copying their own cookie value to a second device, since both carry the same valid `sid` — true per-device enforcement would need a `sessions` table with a per-device identity.
-- Admin seeding (`seedAdmin`) runs inside `ensureSchema`.
+- Admin seeding (`seedAdmin`) runs inside `initSchema`, under the same cached promise as the schema gate; with a matching `schema_meta` version it costs one owner `SELECT` and, unless the secret changed, no PBKDF2 derive.
 - CSRF relies on `SameSite=Strict` plus JSON bodies.
 
 ### Frontend notes
@@ -302,9 +303,9 @@ Not covered: replacing or versioning an already-uploaded PDF (delete and upload 
 6. Progress, notes, comments and course access are keyed by R2 object/folder names. Renaming through the in-app file manager carries them; renaming with rclone, the dashboard or an S3 client does not.
 6a. No access expiry dates; payment is manual (no gateway).
 7. `listCourse` lists the whole bucket per cold isolate/cache expiry.
-8. The schema helper only creates missing tables; altering a table needs a manual `wrangler d1 execute` or a try/catch `ALTER` step.
+8. The schema helper only creates missing tables and adds missing columns, and the `schema_meta` version gate skips that work entirely on a matching cold start. Changing DDL requires bumping `SCHEMA_VERSION` (the hash test fails otherwise); there is still no manual migration command in the Git deploy.
 9. The Worker is plain JavaScript with no tests; the frontend has no tests.
-10. Changing `ADMIN_PASSWORD` after the first run does not update the stored hash.
+10. `ADMIN_PASSWORD` is authoritative: setting or changing it updates the stored hash on the next cold start, and removing it writes the unusable marker so only Google sign-in works for the owner.
 11. The logo font is free for personal use only.
 
 ## 6. Backlog (suggested order)
