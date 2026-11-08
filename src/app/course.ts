@@ -5,6 +5,7 @@ import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
 import { YtPlayer } from './yt-player';
 import { PdfViewer } from './pdf-viewer';
+import { TextViewer } from './text-viewer';
 import { LessonSearch } from './lesson-search';
 import { LessonPanel } from './lesson-panel';
 import { NotesControls } from './notes-controls';
@@ -17,7 +18,7 @@ type View = CourseView;
 @Component({
   selector: 'app-course',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Player, YtPlayer, PdfViewer, LessonPanel, NotesControls, BackButton],
+  imports: [Player, YtPlayer, PdfViewer, TextViewer, LessonPanel, NotesControls, BackButton],
   template: `
     <div class="layout">
 
@@ -61,6 +62,8 @@ type View = CourseView;
                       <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
                     } @else if (item.kind === 'pdf') {
                       <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
+                    } @else if (item.kind === 'txt' || item.kind === 'md') {
+                      <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /><path d="M9 12h6M9 15.5h6M9 8.5h3" /></svg>
                     } @else if (item.kind === 'youtube') {
                       <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
                     } @else {
@@ -118,6 +121,18 @@ type View = CourseView;
                   <div class="defer-fill" aria-live="polite">Loading viewer…</div>
                 } @error {
                   <div class="defer-fill" role="alert">Could not load the viewer. Check your connection and try again.</div>
+                }
+                <app-lesson-panel data-scroll-top [lesson]="l" />
+              } @else if (l.kind === 'txt' || l.kind === 'md') {
+                @defer (on immediate) {
+                  <app-text-viewer [key]="l.id" [md]="l.kind === 'md'" />
+                  <app-lesson-panel data-scroll-top [lesson]="l" />
+                } @placeholder {
+                  <div class="defer-fill" aria-live="polite">Loading lesson...</div>
+                } @loading {
+                  <div class="defer-fill" aria-live="polite">Loading lesson...</div>
+                } @error {
+                  <div class="defer-fill" role="alert">Could not load the lesson. Check your connection and try again.</div>
                 }
               } @else {
                 @defer (on immediate) {

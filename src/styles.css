@@ -235,10 +235,10 @@ button.media-cover{cursor:pointer}
 /* PDF pages are usually light, so the watermark uses a dark translucent ink instead. */
 .wm.pdf{color:rgba(15,23,42,.3);text-shadow:0 0 3px rgba(255,255,255,.55)}
 @media (min-width:1100px){
-  .player-body:not(:has(> app-pdf-viewer)){display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:minmax(0,1fr);gap:1rem;overflow:hidden}
-  .player-body:not(:has(> app-pdf-viewer))>:is(app-player,app-yt-player,app-lesson-panel){min-width:0;min-height:0}
-  .player-body:not(:has(> app-pdf-viewer))>app-lesson-panel{overflow-y:auto;overscroll-behavior:contain}
-  .player-body:not(:has(> app-pdf-viewer))>.defer-fill{grid-column:1/-1}
+  .player-body:not(:has(> :is(app-pdf-viewer,app-text-viewer))){display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:minmax(0,1fr);gap:1rem;overflow:hidden}
+  .player-body:not(:has(> :is(app-pdf-viewer,app-text-viewer)))>:is(app-player,app-yt-player,app-lesson-panel){min-width:0;min-height:0}
+  .player-body:not(:has(> :is(app-pdf-viewer,app-text-viewer)))>app-lesson-panel{overflow-y:auto;overscroll-behavior:contain}
+  .player-body:not(:has(> :is(app-pdf-viewer,app-text-viewer)))>.defer-fill{grid-column:1/-1}
 }
 .to-top{position:fixed;right:clamp(.8rem,3vw,1.6rem);bottom:clamp(.8rem,3vw,1.6rem);z-index:60;display:grid;place-items:center;width:40px;height:40px;min-height:40px;padding:0;border:1px solid var(--border);border-radius:var(--r-surface);background:var(--surface);color:var(--text);animation:to-top-in .18s ease-out}
 .to-top:hover:not(:disabled){background:var(--hover)}
@@ -249,8 +249,13 @@ ngx-extended-pdf-viewer{line-height:normal;display:block}
 ngx-extended-pdf-viewer #toolbarContainer{height:32px!important;padding:0 8px!important;box-sizing:border-box!important}
 ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!important}
 
+/* Reader lessons (PDF / text) are a single column: the viewer fills the visible
+   area and the body scrolls down to the discussion/notes/resources panel below it
+   (spec §7.3). Video/YouTube keeps the two-column layout in the ≥1100px block above. */
+.player-body:has(> :is(app-pdf-viewer,app-text-viewer)){padding:0;overflow-y:auto}
+.player-body:has(> :is(app-pdf-viewer,app-text-viewer))>:is(app-pdf-viewer,app-text-viewer){flex:0 0 100%}
+.player-body:has(> :is(app-pdf-viewer,app-text-viewer))>app-lesson-panel{flex:none}
 /* PDF reader fills the lesson area */
-.player-body:has(> app-pdf-viewer){padding:0;overflow:hidden}
 app-pdf-viewer{display:flex;flex-direction:column;flex:1;min-height:0;height:100%}
 app-pdf-viewer .viewer-wrap{position:relative;flex:1;min-height:0}
 app-pdf-viewer .viewer-wrap ngx-extended-pdf-viewer{position:absolute;inset:0;height:100%}
@@ -614,10 +619,11 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   button.p:hover:not(:disabled){background:var(--primary)!important}
 }
 
-/* PDF on a phone fills the remaining screen */
+/* A PDF/text lesson on a phone fills the remaining screen; the panel stays reachable
+   by scrolling the lesson body. */
 @media(max-width:760px){
-  .layout:has(.player-body > app-pdf-viewer){height:calc(100dvh - var(--head));overflow:hidden}
-  .player-body:has(> app-pdf-viewer){height:auto;min-height:0}
+  .layout:has(.player-body > :is(app-pdf-viewer,app-text-viewer)){height:calc(100dvh - var(--head));overflow:hidden}
+  .player-body:has(> :is(app-pdf-viewer,app-text-viewer)){height:auto;min-height:0}
 }
 
 /* Printing the page (or saving it as PDF) produces a blank sheet */
