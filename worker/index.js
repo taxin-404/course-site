@@ -1,4 +1,4 @@
-import { handleFiles } from './files.js';
+import { handleFiles, LESSON_ROWS } from './files.js';
 import { BANNER_TYPES, bannerKeys } from './banners.js';
 import { lessonOf, hourBucket, publicLesson, pace } from './limits.js';
 import { sessionKey, scramble } from './yt-cipher.mjs';
@@ -1500,6 +1500,38 @@ const handle = async (req, env, state = {}) => {
           await env.DB.prepare('DELETE FROM content_order WHERE path = ?').bind(id).run();
           invalidateCourse();
           return json({ ok: true });
+        }
+        if (path === '/api/admin/youtube/rename' && m === 'POST') {
+          // A YouTube lesson's name is its key, so a rename is a data move: the row changes id
+          // and every table keyed by the old path follows. Nothing is copied, so the video id
+          // and its creation time survive untouched.
+          const b = await req.json();
+          const id = String(b.id || '').trim();
+          const name = String(b.name || '').trim();
+          if (!id) return json({ error: 'Missing lesson' }, 400);
+          if (!name) return json({ error: 'Give the lesson a name' }, 400);
+          if (name.includes('/')) return json({ error: 'A name cannot contain a slash' }, 400);
+          const parts = id.split('/').filter(Boolean);
+          if (parts.length < 2) return json({ error: 'Missing lesson' }, 400);
+          const next = [...parts.slice(0, -1), name].join('/');
+          const row = await env.DB.prepare('SELECT yt, created FROM youtube_lessons WHERE id = ?').bind(id).first();
+          if (!row) return json({ error: 'Not found' }, 404);
+          if (next === id) return json({ ok: true, id });
+          // Refuse to land on another lesson, or on a real file: the file would shadow the
+          // lesson on the site, hiding it together with all of its student data.
+          const clash = await env.DB.prepare('SELECT 1 AS x FROM youtube_lessons WHERE id = ?').bind(next).first();
+          if (clash) return json({ error: 'Something already exists at ' + next }, 409);
+          if (await env.RESOURCES.head(next)) return json({ error: 'Something already exists at ' + next }, 409);
+          const statements = [env.DB.prepare('UPDATE youtube_lessons SET id = ? WHERE id = ?').bind(next, id)];
+          for (const sql of LESSON_ROWS) statements.push(env.DB.prepare(sql).bind(next, id));
+          const order = await env.DB.prepare('SELECT position FROM content_order WHERE path = ?').bind(id).first();
+          if (order) {
+            statements.push(env.DB.prepare('INSERT OR REPLACE INTO content_order (path, position) VALUES (?, ?)').bind(next, Number(order.position)));
+            statements.push(env.DB.prepare('DELETE FROM content_order WHERE path = ?').bind(id));
+          }
+          await env.DB.batch(statements);
+          invalidateCourse();
+          return json({ ok: true, id: next });
         }
         if (path === '/api/admin/users' && m === 'POST') {
           const b = await req.json();

@@ -204,7 +204,7 @@ const IMAGE_FILE = /\.(jpe?g|png|webp|gif|svg)$/i;
                   </button>
                 }
               } @else {
-                <button type="button" class="files-tool" title="Change link" aria-label="Change YouTube link" (click)="editYt(row.yt!)">
+                <button type="button" class="files-tool" title="Edit lesson" aria-label="Edit YouTube lesson" (click)="editYt(row.yt!)">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
                 </button>
               }
@@ -280,19 +280,17 @@ const IMAGE_FILE = /\.(jpe?g|png|webp|gif|svg)$/i;
       <div class="adm-scrim" (click)="closeYt()"></div>
       <div class="adm-dialog" role="dialog" aria-modal="true" aria-label="YouTube lesson">
         <header class="adm-dialog-top">
-          <h3>{{ ytEditing() ? 'Change YouTube link' : 'YouTube lesson' }}</h3>
+          <h3>{{ ytEditing() ? 'Edit lesson' : 'YouTube lesson' }}</h3>
           <button type="button" class="adm-close" aria-label="Close" (click)="closeYt()">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
           </button>
         </header>
         <div class="adm-form">
           <p class="adm-muted sm">Added to {{ path() }}.</p>
-          @if (!ytEditing()) {
-            <label class="field">
-              <span>Lesson name</span>
-              <input [value]="ytName()" (input)="ytName.set($any($event.target).value)" autocomplete="off" spellcheck="false" />
-            </label>
-          }
+          <label class="field">
+            <span>Lesson name@if (ytEditing()) { <em class="adm-muted sm">· renaming moves its notes, comments and progress</em> }</span>
+            <input [value]="ytName()" (input)="ytName.set($any($event.target).value)" autocomplete="off" spellcheck="false" />
+          </label>
           <label class="field">
             <span>YouTube link</span>
             <input [value]="ytLink()" (input)="ytLink.set($any($event.target).value)" placeholder="https://youtu.be/... or the video id" autocomplete="off" spellcheck="false" (keydown.enter)="saveYt()" />
@@ -699,16 +697,27 @@ export class AdminFiles implements OnDestroy {
     const editing = this.ytEditing();
     const name = this.ytName().trim();
     const link = this.ytLink().trim();
-    if (!editing && !name) { this.ytError.set('Give the lesson a name.'); return; }
+    if (!name) { this.ytError.set('Give the lesson a name.'); return; }
     if (name.includes('/')) { this.ytError.set('A name cannot contain a slash.'); return; }
     if (!link) { this.ytError.set('Paste a YouTube link.'); return; }
-    const full = editing ?? this.join(this.path(), name);
-    const parts = full.split('/');
     this.busy.set(true);
     try {
-      const r = await this.api.addYoutubeLesson(parts[0], parts.slice(1, -1).join('/'), parts[parts.length - 1], link);
-      this.ytOpen.set(false);
-      this.toast(r.shadowed ? 'Saved, but a file already uses that path, so it will not show.' : editing ? 'Link updated' : 'Lesson added', r.shadowed);
+      if (editing) {
+        // The name is the lesson's key, so a changed name is a data move: the server moves the
+        // row and everything attached to it. The link is then upserted on the resulting id.
+        const oldName = editing.split('/').pop() || '';
+        const next = name === oldName ? editing : (await this.api.renameYoutubeLesson(editing, name)).id;
+        const parts = next.split('/');
+        await this.api.addYoutubeLesson(parts[0], parts.slice(1, -1).join('/'), parts[parts.length - 1], link);
+        this.ytOpen.set(false);
+        this.toast(name === oldName ? 'Link updated' : 'Lesson renamed');
+      } else {
+        const full = this.join(this.path(), name);
+        const parts = full.split('/');
+        const r = await this.api.addYoutubeLesson(parts[0], parts.slice(1, -1).join('/'), parts[parts.length - 1], link);
+        this.ytOpen.set(false);
+        this.toast(r.shadowed ? 'Saved, but a file already uses that path, so it will not show.' : 'Lesson added', r.shadowed);
+      }
       void this.api.init();
       await this.load();
     } catch (e) {

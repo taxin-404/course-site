@@ -221,6 +221,9 @@ export class Api {
   addYoutubeLesson(course: string, folder: string, lesson: string, link: string): Promise<{ ok: boolean; id: string; yt: string; shadowed: boolean }> {
     return this.req('admin/youtube', { course, folder, lesson, link });
   }
+  renameYoutubeLesson(id: string, name: string): Promise<{ ok: boolean; id: string }> {
+    return this.req('admin/youtube/rename', { id, name });
+  }
   deleteYoutubeLesson(id: string): Promise<unknown> { return this.req('admin/youtube', { id }, 'DELETE'); }
 
   getNotes(lesson: string): Promise<{ data: object[] }> { return this.req(`notes/${encodeURIComponent(lesson)}`); }

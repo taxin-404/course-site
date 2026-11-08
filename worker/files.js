@@ -277,7 +277,7 @@ async function youtubeMoveStatements(env, from, to) {
 // objects are gone would orphan student data, so the delete is last and the whole thing is
 // safe to run twice (an identical copy at the target is treated as already done).
 
-const LESSON_ROWS = [
+export const LESSON_ROWS = [
   'UPDATE comments SET lesson = ? WHERE lesson = ?',
   'UPDATE OR REPLACE video_notes SET lesson = ? WHERE lesson = ?',
   'UPDATE OR REPLACE pdf_notes SET lesson = ? WHERE lesson = ?',
