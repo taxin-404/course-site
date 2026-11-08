@@ -480,6 +480,7 @@ button.lr-open:hover:not(:disabled){background:none;text-decoration:underline}
 .files-tool:hover:not(:disabled){background:var(--hover);color:var(--text)}
 .files-tool.danger:hover:not(:disabled){background:var(--danger-soft);color:var(--danger)}
 .files-error{margin:0;padding:.5rem .7rem;border:1px solid var(--border);border-left:3px solid var(--danger);border-radius:var(--r-surface);color:var(--danger);font-size:13px}
+.files-note{margin:.2rem .2rem .5rem;color:var(--muted);font-size:12.5px;line-height:1.45}
 .files-empty{margin:0;padding:2rem 1rem;text-align:center;color:var(--muted)}
 .files-jobs{display:grid;gap:.35rem}
 .files-job{display:flex;align-items:center;gap:.6rem;padding:.45rem .7rem}

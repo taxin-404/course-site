@@ -32,6 +32,10 @@ interface Toast { id: number; text: string; bad: boolean }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** Mirrors worker/banners.js; this copy only labels the row. */
+const BANNER_FILE = /^[^/]+\/banner\.(jpe?g|png|webp)$/i;
+const IMAGE_FILE = /\.(jpe?g|png|webp|gif)$/i;
+
 @Component({
   selector: 'app-admin-files',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -80,6 +84,10 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
       </div>
 
       @if (error()) { <p class="files-error">{{ error() }}</p> }
+
+      @if (path() && !path().includes('/')) {
+        <p class="files-note">Card banner: upload banner.jpg, banner.png or banner.webp to this folder (landscape, about 16:9).</p>
+      }
 
       @if (uploader.jobs().length) {
         <div class="files-jobs">
@@ -162,6 +170,8 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
                     } @else {
                       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m10 9 5 3-5 3z" /></svg>
                     }
+                  } @else if (isImage(row.name)) {
+                    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="8.5" cy="9" r="1.5" /><path d="m21 15-5-5L5 20" /></svg>
                   } @else {
                     <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
                   }
@@ -388,7 +398,7 @@ export class AdminFiles implements OnDestroy {
       })),
       ...listing.files.map((f) => ({
         path: f.key, name: f.name, kind: 'file' as const,
-        meta: this.size(f.size) + (f.lesson ? ' · lesson' : '') + (f.hls ? ' · HLS' : ''),
+        meta: this.size(f.size) + (f.lesson ? ' · lesson' : '') + (f.hls ? ' · HLS' : '') + (this.isBanner(f.key) ? ' · course banner' : ''),
         position: order[f.key] ?? null, file: f, yt: null,
       })),
       ...this.ytRows().map((y) => ({
@@ -443,6 +453,10 @@ export class AdminFiles implements OnDestroy {
   ngOnDestroy(): void {
     this.uploader.dispose();
   }
+
+  protected isBanner(path: string): boolean { return BANNER_FILE.test(path); }
+
+  protected isImage(name: string): boolean { return IMAGE_FILE.test(name); }
 
   protected pick(input: HTMLInputElement): void {
     const files = Array.from(input.files || []);
