@@ -2,7 +2,7 @@
 
 For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the Angular 22 / TypeScript 6 upgrade (see the decision log), lazy loading of the PDF viewer and admin panel, the YouTube lessons feature, the file manager (uploads, rename, move, delete, folders, admin-controlled ordering), the admin panel, UI redesign and mobile pass, the picture-in-picture and sidecar-subtitle work on the lesson players, PDF resources on video lessons, the course catalog with locked courses, the course banners, resource editing and 3/2/1 home grid, and the text/Markdown resources and lessons, the reserved `RESOURCE` folder shared with every lesson beneath it, and the Discussion/Notes/Resources panel on every lesson kind.
 
-**Deploy status: this work is on the `dev` branch only, until the owner says "main now".** Do not deploy it to `main` / production yet.
+**Deploy status: shipped to `main` (production) on 2026-11-09.** The owner said "main now" after the live end-to-end smoke on `dev` passed and the test data was cleaned up.
 
 ## 1. Goal and requirements
 
