@@ -43,13 +43,19 @@ export function isLessonKey(key) {
   return /\.(pdf|txt|md|markdown)$/i.test(key) || VIDEO_EXT.test(key);
 }
 
-/** Validates a folder prefix. '' is the root; returns null when the path is not usable. */
+/**
+ * Validates a folder prefix. '' is the root; returns null when the path is not usable.
+ *
+ * Only `/` is a separator. A backslash is an ordinary character in a name (it is not
+ * translated to a slash): the key IS the tree, so rewriting `\` would silently nest a
+ * folder the owner meant to name. A pasted Windows drive path is refused outright by the
+ * `C:` guard below instead.
+ */
 export function cleanPath(raw) {
   if (typeof raw !== 'string') return null;
   let p = raw
     .replace(/[\u0000-\u001f\u007f]/g, '')
     .trim()
-    .replace(/\\/g, '/')
     .replace(/\/{2,}/g, '/')
     .replace(/^\/+|\/+$/g, '');
   if (!p) return '';

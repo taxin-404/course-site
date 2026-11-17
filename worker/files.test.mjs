@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isLessonKey, hasReservedSegment, ancestorScopes, childDirsFromIds } from './files.js';
+import { cleanPath, isLessonKey, hasReservedSegment, ancestorScopes, childDirsFromIds } from './files.js';
 
 const IDS = [
   'Course/ক্লাস করার নিয়ম/Vedio',   // folder directly under the course
@@ -47,4 +47,16 @@ test('childDirsFromIds never invents a RESOURCE folder from a YouTube id', () =>
 test('isLessonKey keeps every RESOURCE file out of lesson handling', () => {
   assert.equal(isLessonKey('C/RESOURCE/syllabus.txt'), false);
   assert.equal(isLessonKey('C/RESOURCE/syllabus.md'), false);
+});
+
+test('cleanPath keeps a backslash as an ordinary character in a name', () => {
+  assert.equal(cleanPath('Course/প্রশ্ন\\উত্তর'), 'Course/প্রশ্ন\\উত্তর');
+});
+
+test('cleanPath does not split or collapse backslashes', () => {
+  assert.equal(cleanPath('Course/a\\\\b'), 'Course/a\\\\b');
+});
+
+test('cleanPath still refuses a pasted Windows drive path whole', () => {
+  assert.equal(cleanPath('C:\\courses\\bangla'), null);
 });
