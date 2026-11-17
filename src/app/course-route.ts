@@ -40,3 +40,17 @@ export function folderUrl(course: string, path: readonly string[]): string[] {
 export function lessonUrl(course: string, lessonId: string): string[] {
   return ['/course', course, 'lesson', ...lessonId.split('/').slice(1)];
 }
+
+/**
+ * Percent-encode literal brackets in a URL path.
+ *
+ * Cloudflare's asset layer decodes `%28`/`%29` back to `(`/`)` before the app boots (they are
+ * in `encodeURIComponent`'s "safe" set), and Angular reads a raw `(...)` as secondary-outlet
+ * syntax — so a course, folder or lesson name that contains brackets is cut at the first one
+ * on a reload or a shared link, and the screen comes up empty. The name is opaque text here,
+ * so brackets are put back as `%28`/`%29` before the router reads the URL. Already-encoded
+ * brackets are left alone, so this is safe to run on any URL.
+ */
+export function encodeBracketsInPath(path: string): string {
+  return path.replace(/\(/g, '%28').replace(/\)/g, '%29');
+}

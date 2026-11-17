@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCourseTail, courseUrl, folderUrl, lessonUrl } from './course-route.ts';
+import { parseCourseTail, courseUrl, folderUrl, lessonUrl, encodeBracketsInPath } from './course-route.ts';
 
 test('the course root is a browser at the course folder', () => {
   assert.deepEqual(parseCourseTail('Math', ''), { kind: 'browser', course: 'Math', path: [] });
@@ -47,4 +47,17 @@ test('a round trip survives names with spaces and unicode', () => {
     course: 'গণিত',
     path,
   });
+});
+
+test('encodeBracketsInPath re-encodes brackets the edge decoded', () => {
+  assert.equal(
+    encodeBracketsInPath('/course/B%5CD%20Unit%20Course%205.0%20(26%20Batch)'),
+    '/course/B%5CD%20Unit%20Course%205.0%20%2826%20Batch%29',
+  );
+});
+
+test('encodeBracketsInPath leaves an ordinary or already-encoded path alone', () => {
+  assert.equal(encodeBracketsInPath('/course/MERN%20Stack'), '/course/MERN%20Stack');
+  assert.equal(encodeBracketsInPath('/course/a%28b%29'), '/course/a%28b%29');
+  assert.equal(encodeBracketsInPath('/'), '/');
 });
