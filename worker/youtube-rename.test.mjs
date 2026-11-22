@@ -160,13 +160,14 @@ test('deleting a YouTube lesson removes its bookmarks', async () => {
   assert.equal(res.status, 200);
   assert.equal(count('SELECT COUNT(*) n FROM bookmarks WHERE lesson = ?', id), 0);
 });
+
 test('moving a YouTube-only folder carries its bookmarks and other lesson rows', async () => {
   const oldId = 'MERN Stack/yt-only/class';
   const newId = 'MERN Stack/yt-moved/class';
   const uid = seedLesson(oldId, 'YT123');
 
   const res = await post('/api/admin/files/move', { from: 'MERN Stack/yt-only', to: 'MERN Stack/yt-moved' }, adminCookie);
-  assert.equal(res.status, 200, JSON.stringify(await res.clone().json?.() ?? ''));
+  assert.equal(res.status, 200);
 
   for (const table of ['watched', 'pdf_notes', 'video_notes', 'note_assets', 'comments', 'resources', 'bookmarks']) {
     assert.equal(count(`SELECT COUNT(*) n FROM ${table} WHERE lesson = ?`, oldId), 0, `${table} has no rows on the old id`);

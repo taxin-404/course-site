@@ -15,6 +15,7 @@ course-site/
   scripts/doctor.mjs     Diagnoses account, bucket, CORS, lifecycle and secrets (`npm run doctor`)
   scripts/cloudflare.mjs Helpers shared by the three scripts above
   worker/index.js        API, auth, admin, course listing, media streaming (the Worker)
+  worker/entry.js        Wrangler entrypoint: re-exports only `default` and `RateLimiter`
   worker/files.js        File manager API: listing, folders, move/rename, delete, upload handshake
   worker/youtube.js      YouTube lessons: an optional first-run seed (lessons are managed from the Files view)
   worker/s3.js           R2 S3 signing (aws4fetch): server calls and presigned browser PUTs
