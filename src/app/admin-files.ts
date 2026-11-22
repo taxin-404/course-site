@@ -297,13 +297,10 @@ const IMAGE_FILE = /\.(jpe?g|png|webp|gif|svg)$/i;
           </label>
           @if (!ytEditing()) {
             <label class="field">
-              <span>…or import a CSV · "no.","name","link"</span>
+              <span>…or import a CSV</span>
               <input #csvPicker type="file" accept=".csv,text/csv" (change)="onCsv(csvPicker)" />
             </label>
-            <p class="adm-muted sm">
-              The no. column sets the order in this folder; leave it blank to keep the file order.
-              <button type="button" class="link" (click)="downloadTemplate()">Download template</button>
-            </p>
+            <p class="adm-muted sm">Format: "no.","name","link" · <button type="button" class="link" (click)="downloadTemplate()">Download template</button></p>
             @if (csvName()) {
               <p class="adm-muted sm">{{ csvRows().length }} lessons found in {{ csvName() }}@if (csvBad().length) { · {{ csvBad().length }} skipped}.</p>
               <ul class="yt-import">
