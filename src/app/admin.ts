@@ -3,6 +3,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Api, AdminUser, BulkResult } from './api';
 import { AdminFiles } from './admin-files';
+import { BackButton } from './back-button';
 import { OptionsMenu } from './options-menu';
 import { AccessMode, applyCourseAccess } from './course-access';
 
@@ -51,6 +52,7 @@ const MODES: { key: CourseMode; label: string }[] = [
           <p class="adm-sub">Search and filter below; the matching users are listed underneath.</p>
         </div>
         <div class="adm-top-actions">
+          <app-back-button />
           <button type="button" class="link" (click)="showFiles()">Course files</button>
           <button type="button" class="icon-btn" title="Refresh" aria-label="Refresh list" [disabled]="loading()" (click)="refresh()">
             <svg [class.spinning]="loading()" viewBox="0 0 24 24" aria-hidden="true">
@@ -483,7 +485,7 @@ const MODES: { key: CourseMode; label: string }[] = [
       }
     </div>
   `,
-  imports: [AdminFiles, OptionsMenu],
+  imports: [AdminFiles, BackButton, OptionsMenu],
 })
 export class Admin implements OnInit {
   protected readonly api = inject(Api);
