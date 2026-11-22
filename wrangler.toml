@@ -1,5 +1,5 @@
 name = "course-site"
-main = "worker/index.js"
+main = "worker/entry.js"
 compatibility_date = "2026-10-01"
 
 [observability]

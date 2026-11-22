@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import worker, {
   ensureSchema, guardDb, guardEnv, initSchema,
   SCHEMA, MIGRATIONS, SCHEMA_VERSION,
@@ -325,4 +326,20 @@ test('the schema hash matches the version constant', () => {
     '2e20272e514de6605a76d2d25af7f17bb861065445f545d5aa534b5c92eba2dc',
     'The schema or migration DDL changed. Bump SCHEMA_VERSION in worker/index.js, then update this hash.',
   );
+});
+
+// ---- the Wrangler entrypoint -------------------------------------------------------------
+
+test('Wrangler runs a thin entrypoint with only valid entrypoint exports', async () => {
+  // Wrangler treats every named export on the entry module as a second entrypoint and
+  // refuses to bundle when one is a plain value. index.js exports schema constants for
+  // these tests, so wrangler.toml must point at entry.js, which re-exports the handler
+  // and the Durable Object class only.
+  const toml = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  assert.match(toml, /^main = "worker\/entry\.js"$/m, 'wrangler.toml must use the thin entrypoint');
+
+  const entry = await import('./entry.js');
+  assert.deepEqual(Object.keys(entry).sort(), ['RateLimiter', 'default']);
+  assert.equal(typeof entry.RateLimiter, 'function', 'the Durable Object class is exported');
+  assert.equal(typeof entry.default.fetch, 'function', 'the default handler is exported');
 });
