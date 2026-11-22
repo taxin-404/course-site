@@ -8,6 +8,12 @@
   Cache-Control: public, max-age=31536000, immutable
 /styles-*.css
   Cache-Control: public, max-age=31536000, immutable
+# The PDF viewer's worker and viewer bundles carry the library version in the file name,
+# so the idle prefetch on the course page need not revalidate them on every visit.
+/assets/pdf.worker-*.mjs
+  Cache-Control: public, max-age=31536000, immutable
+/assets/viewer-*.mjs
+  Cache-Control: public, max-age=31536000, immutable
 
 /*
   X-Content-Type-Options: nosniff

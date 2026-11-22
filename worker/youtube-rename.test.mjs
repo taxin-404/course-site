@@ -27,7 +27,7 @@ const post = (path, body, cookie, e = env) =>
 let adminCookie = '';
 let beforeBoot;
 before(async () => {
-  beforeBoot ||= call('/api/me').then((res) => assert.equal(res.status, 401));
+  beforeBoot ||= call('/api/me').then((res) => assert.equal(res.status, 200)); // signed out = 200 + null
   await beforeBoot;
   const res = await call('/api/login', {
     method: 'POST',

@@ -62,7 +62,7 @@ async function login(email, { pw = STUDENT_PW, ip = '10.0.0.1' } = {}) {
 let cookie = '';
 let adminCookie = '';
 before(async () => {
-  await call('/api/me').then((res) => assert.equal(res.status, 401)); // boot the schema
+  await call('/api/me').then((res) => assert.equal(res.status, 200)); // boot the schema (signed out = 200 + null)
   const email = await addUser();
   await enroll(email, 'Course');
   ({ cookie } = await login(email));

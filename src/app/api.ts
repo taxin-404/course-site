@@ -119,7 +119,12 @@ export class Api {
     // email/password fields instead of a moment later.
     this.configReq ??= this.req<GoogleConfig>('config').catch(() => ({ googleClientId: '' }));
     try {
-      this.me.set(await this.req<Me>('me'));
+      // The server answers the session probe with 200 + null when signed out (not a 401),
+      // so an anonymous visit logs no failed request. Stop here instead of asking for the
+      // course list, which would be refused.
+      const me = await this.req<Me | null>('me');
+      this.me.set(me);
+      if (!me) return;
       this.courses.set(await this.req<CourseData[]>('course'));
       this.order.set(await this.req<Record<string, number>>('order'));
     } catch {
@@ -130,7 +135,12 @@ export class Api {
   /** Re-check the session; a 401 signs the client out through req(). */
   async refreshMe(): Promise<void> {
     if (this.me() == null) return;
-    try { this.me.set(await this.req<Me>('me')); } catch { /* 401 already handled; a network error keeps the session */ }
+    try {
+      const me = await this.req<Me | null>('me');
+      // A null body means the session was revoked elsewhere; a thrown error (network) keeps it.
+      if (me) this.me.set(me);
+      else this.signOutLocal();
+    } catch { /* a network error keeps the session */ }
   }
 
   async login(email: string, password: string): Promise<void> {

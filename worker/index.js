@@ -1132,9 +1132,15 @@ const handle = async (req, env, state = {}) => {
       if (path === '/api/logout' && m === 'POST') return json({ ok: true }, 200, { 'set-cookie': clearCookie(secure) });
 
       const u = await getUser(req, env);
+      // The app's first request is this session probe, so answer it with 200 + null when
+      // signed out. A 401 here is expected, not an error, and logging one on every visit
+      // to the sign-in page is noise (and fails a Lighthouse best-practice audit). Every
+      // other route keeps a real 401.
+      if (path === '/api/me' && m === 'GET') {
+        if (!u) return json(null);
+        return json({ id: u.id, email: u.email, is_admin: u.is_admin, name: displayName(u.id), ytKey: await sessionKey(env.SESSION_SECRET, u.id, u.sid) });
+      }
       if (!u) return json({ error: 'Not logged in' }, 401);
-
-      if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin, name: displayName(u.id), ytKey: await sessionKey(env.SESSION_SECRET, u.id, u.sid) });
       // "Sign out everywhere": bump the session version so every cookie minted before now
       // fails getUser, then clear this device's cookie too. Available to any user (admins
       // included) as the least disruptive alternative to forcing single-device login on admins.

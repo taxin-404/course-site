@@ -37,7 +37,7 @@ const call = (path, { method = 'GET', headers = {}, body, e = env } = {}) =>
 let booted;
 before(async () => {
   // /api/config no longer touches D1, so boot the schema through a database route.
-  booted ||= call('/api/me').then((res) => assert.equal(res.status, 401));
+  booted ||= call('/api/me').then((res) => assert.equal(res.status, 200)); // signed out = 200 + null
   await booted;
 });
 
@@ -635,7 +635,9 @@ test('sign out everywhere ends every session for the account', async () => {
   assert.equal((await call('/api/me', { headers: { cookie } })).status, 200);
   const out = await call('/api/logout/all', { method: 'POST', headers: { cookie, origin: ORIGIN } });
   assert.equal(out.status, 200);
-  assert.equal((await call('/api/me', { headers: { cookie } })).status, 401, 'the old cookie is dead');
+  const dead = await call('/api/me', { headers: { cookie } });
+  assert.equal(dead.status, 200, 'the session probe still answers');
+  assert.equal(await dead.json(), null, 'the old cookie is dead');
 });
 
 // ---- PDF note images: stored in R2, referenced from the notes JSON by URL ----
