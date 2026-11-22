@@ -1316,6 +1316,20 @@ const handle = async (req, env, state = {}) => {
         await env.DB.prepare(done ? 'INSERT OR IGNORE INTO watched (user_id, lesson) VALUES (?, ?)' : 'DELETE FROM watched WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
         return json({ ok: true });
       }
+      if (path === '/api/bookmarks' && m === 'POST') {
+        const { lesson, bookmarked } = await req.json();
+        // Same rule as progress: a real lesson in a course the student is granted.
+        const access = await lessonAccess(env, u, lesson);
+        if (access !== 'ok') return accessError(access);
+        if (bookmarked) {
+          await env.DB.prepare('INSERT OR IGNORE INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)')
+            .bind(u.id, lesson, Date.now()).run();
+        } else {
+          await env.DB.prepare('DELETE FROM bookmarks WHERE user_id = ? AND lesson = ?')
+            .bind(u.id, lesson).run();
+        }
+        return json({ ok: true, bookmarked: !!bookmarked });
+      }
       // ---- Lesson discussion, private notes and admin resources (video lessons) ----
       if (path.startsWith('/api/lesson/') && path.endsWith('/comments')) {
         const key = decodeURIComponent(path.slice('/api/lesson/'.length, -'/comments'.length));

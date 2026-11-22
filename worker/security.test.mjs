@@ -504,6 +504,51 @@ test('/api/course reports only the signed-in student’s bookmarks', async () =>
   assert.equal(hidden.bookmarked, true, 'the row survived the lock and is visible again');
 });
 
+test('/api/bookmarks toggles one private row and only accepts accessible lessons', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const headers = { cookie, origin: ORIGIN, 'content-type': 'application/json' };
+  const send = (lesson, bookmarked, c = cookie) => call('/api/bookmarks', {
+    method: 'POST',
+    headers: { ...headers, cookie: c },
+    body: JSON.stringify({ lesson, bookmarked }),
+  });
+
+  const signedOut = await call('/api/bookmarks', {
+    method: 'POST',
+    headers: { origin: ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ lesson: 'Course/notes.pdf', bookmarked: true }),
+  });
+  assert.equal(signedOut.status, 401, 'must be signed in');
+  assert.equal((await send('Course/missing.pdf', true)).status, 404, 'unknown lesson');
+  assert.equal((await send('Other/hidden.pdf', true)).status, 403, 'unenrolled course');
+  assert.equal((await send('Course/notes.pdf', true)).status, 200);
+
+  const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+  const row = () => raw.prepare('SELECT created FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid, 'Course/notes.pdf');
+  assert.ok(row(), 'the bookmark was stored');
+  const created = row().created;
+
+  await send('Course/notes.pdf', true);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid, 'Course/notes.pdf').n, 1);
+  assert.equal(row().created, created, 'adding twice keeps the first timestamp');
+
+  const email2 = await addUser();
+  await enroll(email2, 'Course');
+  const { cookie: cookie2 } = await login(email2, { ip: '10.0.0.2' });
+  await send('Course/notes.pdf', true, cookie2);
+  const uid2 = raw.prepare('SELECT id FROM users WHERE email = ?').get(email2).id;
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid2, 'Course/notes.pdf').n, 1);
+
+  await send('Course/notes.pdf', false, cookie2);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid2, 'Course/notes.pdf').n, 0, 'user 2 removed only their own row');
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid, 'Course/notes.pdf').n, 1, 'user 1 is untouched');
+
+  await send('Course/notes.pdf', false);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid, 'Course/notes.pdf').n, 0);
+});
+
 test('a course banner is served to any signed-in user, and SVG cannot run script', async () => {
   const email = await addUser(); // deliberately not enrolled in Other
   const { cookie } = await login(email);
