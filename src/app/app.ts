@@ -1,5 +1,5 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterRenderEffect, computed, inject, signal, viewChild } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterRenderEffect, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Router, RouterOutlet } from '@angular/router';
 import { Api, CourseData } from './api';
 import { Login } from './login';
 import { LessonSearch } from './lesson-search';
@@ -122,6 +122,7 @@ export class App {
   protected readonly api = inject(Api);
   protected readonly search = inject(LessonSearch);
   protected readonly shell = inject(Shell);
+  private readonly router = inject(Router);
   private readonly lessonInput = viewChild<ElementRef<HTMLInputElement>>('lessonQ');
   private readonly searchToggle = viewChild<ElementRef<HTMLButtonElement>>('searchToggle');
   private returnFocus = false;
@@ -137,6 +138,15 @@ export class App {
 
   constructor() {
     void this.api.init();
+    // Routing is disabled until the session check finishes (see app.config). Once a user is
+    // known, start it on the URL the browser is already on, so a signed-out deep link is
+    // preserved and only then loads its route. A signed-out visit never starts routing.
+    let routed = false;
+    effect(() => {
+      if (routed || !this.api.me()) return;
+      routed = true;
+      void this.router.initialNavigation();
+    });
     // On a phone the header swaps to the full-width field; move focus with it, and
     // hand focus back to the magnifier when the field collapses (after it is visible).
     afterRenderEffect(() => {

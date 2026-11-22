@@ -122,7 +122,7 @@ type View = CourseView;
                   <!-- One instance per lesson id: notes and the pending autosave belong to one PDF,
                        so switching documents must destroy the old viewer instead of reusing it. -->
                   @for (id of [l.id]; track id) {
-                    <app-pdf-viewer [key]="id" />
+                    <app-pdf-viewer #pdfViewer [key]="id" />
                   }
                 } @placeholder {
                   <div class="defer-fill" aria-live="polite">Loading viewer…</div>
@@ -237,8 +237,9 @@ export class Course {
     return course ? parseCourseTail(course, this.params().get('tail') ?? '') : null;
   });
 
-  /** The lesson's PDF viewer, so the lesson bar can drive its notes controls. */
-  protected readonly pdfViewer = viewChild(PdfViewer);
+  /** The lesson's PDF viewer, so the lesson bar can drive its notes controls. Queried by
+   * template reference (not by class) so the whole PDF library stays in the deferred chunk. */
+  protected readonly pdfViewer = viewChild<PdfViewer>('pdfViewer');
 
   /**
    * The open course, always read live from Api state. Holding the `CourseData`

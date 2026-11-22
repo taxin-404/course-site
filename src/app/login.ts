@@ -21,7 +21,7 @@ function loadGsi(): Promise<void> {
   changeDetection: ChangeDetectionStrategy.Eager,
   imports: [FormsModule],
   template: `
-    <form class="login" (ngSubmit)="submit()">
+    <form class="login" role="main" (ngSubmit)="submit()">
       <h1>Sign in</h1>
       <label class="field">
         <span>Email</span>

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import { PdfViewer } from './pdf-viewer';
+import type { PdfViewer } from './pdf-viewer';
 
 /**
  * The PDF notes controls (status, hide/show, delete), shared by the

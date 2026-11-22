@@ -1,5 +1,5 @@
 import { ApplicationConfig, inject, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
-import { provideRouter } from '@angular/router';
+import { provideRouter, withDisabledInitialNavigation } from '@angular/router';
 import { routes } from './app.routes';
 import { NavHistory } from './nav-history';
 
@@ -14,6 +14,9 @@ export const appConfig: ApplicationConfig = {
     provideAppInitializer(() => {
       inject(NavHistory);
     }),
-    provideRouter(routes),
+    // Start routing only once the session is known (App does it). Navigating eagerly made
+    // the sign-in page download the lazily-loaded Course route and its PDF viewer — about
+    // 190 KiB of a 643 KiB page — for a screen that can never show it.
+    provideRouter(routes, withDisabledInitialNavigation()),
   ]
 };

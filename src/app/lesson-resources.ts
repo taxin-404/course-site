@@ -119,7 +119,7 @@ import { NotesControls } from './notes-controls';
               @if (r.kind === 'pdf' && pdfViewer(); as pv) { <app-notes-controls [viewer]="pv" /> }
             </div>
             @if (r.kind === 'pdf') {
-              <app-pdf-viewer [key]="r.url" />
+              <app-pdf-viewer #pdfViewer [key]="r.url" />
             } @else {
               <app-text-viewer [key]="r.url" [md]="r.kind === 'md'" />
             }
@@ -194,7 +194,7 @@ export class LessonResources {
   protected readonly editBusy = signal(false);
   protected readonly editTitleInput = viewChild<ElementRef<HTMLInputElement>>('editTitleInput');
   /** The viewer inside the modal, so its header can render the shared notes controls. */
-  protected readonly pdfViewer = viewChild(PdfViewer);
+  protected readonly pdfViewer = viewChild<PdfViewer>('pdfViewer');
   private readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
   private readonly backBtn = viewChild<ElementRef<HTMLButtonElement>>('backBtn');
   private readonly destroyRef = inject(DestroyRef);

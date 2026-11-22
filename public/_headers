@@ -1,3 +1,14 @@
+# Angular puts a content hash in each bundle name, so a cached copy can never be stale:
+# the next build changes the URL. Skip the browser revalidation on repeat visits.
+/main-*.js
+  Cache-Control: public, max-age=31536000, immutable
+/chunk-*.js
+  Cache-Control: public, max-age=31536000, immutable
+/polyfills-*.js
+  Cache-Control: public, max-age=31536000, immutable
+/styles-*.css
+  Cache-Control: public, max-age=31536000, immutable
+
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
