@@ -21,6 +21,13 @@
 
 export interface CsvRow { name: string; link: string; yt: string; no: number | null }
 export interface CsvReject { line: number; reason: string }
+export interface CsvRequest { lessons: { lesson: string; link: string }[]; ordered: boolean }
+
+/** The parsed file as the one request that imports it. `ordered` is only true when every
+ *  row carries a number, because that is when the server should save the folder order. */
+export function csvPayload(rows: CsvRow[]): CsvRequest {
+  return { lessons: rows.map((r) => ({ lesson: r.name, link: r.link })), ordered: rows.length > 0 && rows.every((r) => r.no !== null) };
+}
 
 /** Header words that name a row-number column (compared after `headerName`). */
 const NO_HEADERS = new Set(['no', 'nr', 'number', '#', 'order', 'position', 'pos', 'sn', 's.no', 'sr.no']);

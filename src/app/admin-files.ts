@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, output, signal } from '@angular/core';
 import { Api, FileEntry, FileListing, YoutubeLesson } from './api';
-import { CsvReject, CsvRow, parseYoutubeCsv } from './youtube-csv';
+import { CsvReject, CsvRow, csvPayload, parseYoutubeCsv } from './youtube-csv';
 import { UploadJob, Uploader } from './upload';
 import { OptionsMenu } from './options-menu';
 
@@ -753,29 +753,20 @@ export class AdminFiles implements OnDestroy {
     const parts = this.path().split('/');
     const course = parts[0];
     const folder = parts.slice(1).join('/');
+    const { lessons, ordered } = csvPayload(rows);
     this.busy.set(true);
     this.ytError.set('');
-    let added = 0;
-    let shadowed = 0;
-    const failed: string[] = [];
     try {
-      for (const r of rows) {
-        try {
-          const res = await this.api.addYoutubeLesson(course, folder, r.name, r.link);
-          added++;
-          if (res.shadowed) shadowed++;
-        } catch {
-          failed.push(r.name);
-        }
-      }
-      if (failed.length) {
-        this.ytError.set(`${failed.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`);
-      } else {
-        this.closeYt();
-        this.toast(shadowed ? `Added ${added} lessons · ${shadowed} hidden by a file with the same path` : `Added ${added} lesson${added === 1 ? '' : 's'}`, shadowed > 0);
-      }
+      const res = await this.api.importYoutubeLessons(course, folder, lessons, ordered);
+      const hidden = res.shadowed.length;
+      this.closeYt();
+      this.toast(hidden
+        ? `Added ${res.added} lessons · ${hidden} hidden by a file with the same path`
+        : `Added ${res.added} lesson${res.added === 1 ? '' : 's'}`, hidden > 0);
       void this.api.init();
       await this.load();
+    } catch (e) {
+      this.ytError.set(message(e));
     } finally {
       this.busy.set(false);
     }

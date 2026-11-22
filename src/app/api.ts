@@ -254,6 +254,10 @@ export class Api {
   addYoutubeLesson(course: string, folder: string, lesson: string, link: string): Promise<{ ok: boolean; id: string; yt: string; shadowed: boolean }> {
     return this.req('admin/youtube', { course, folder, lesson, link });
   }
+  /** One request for a whole CSV; `ordered` asks the server to save the folder order once. */
+  importYoutubeLessons(course: string, folder: string, lessons: { lesson: string; link: string }[], ordered: boolean): Promise<{ ok: boolean; added: number; order: boolean; shadowed: string[] }> {
+    return this.req('admin/youtube', { course, folder, lessons, order: ordered });
+  }
   renameYoutubeLesson(id: string, name: string): Promise<{ ok: boolean; id: string }> {
     return this.req('admin/youtube/rename', { id, name });
   }
