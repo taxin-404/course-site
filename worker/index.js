@@ -1,4 +1,4 @@
-import { handleFiles, hasReservedSegment, isReservedDir, ancestorScopes, LESSON_ROWS } from './files.js';
+import { handleFiles, appendToFolderOrder, hasReservedSegment, isReservedDir, ancestorScopes, LESSON_ROWS } from './files.js';
 import { BANNER_TYPES, bannerKeys } from './banners.js';
 import { lessonOf, hourBucket, publicLesson, pace } from './limits.js';
 import { sessionKey, scramble } from './yt-cipher.mjs';
@@ -1581,21 +1581,57 @@ const handle = async (req, env, state = {}) => {
           }));
         }
         if (path === '/api/admin/youtube' && m === 'POST') {
+          // One lesson (the dialog) or a whole CSV (bulk). The bulk form is all-or-nothing:
+          // a bad row refuses the batch rather than half-importing a course.
           const b = await req.json();
           const course = String(b.course || '').trim();
-          const lesson = String(b.lesson || '').trim();
           const folder = String(b.folder || '').trim();
-          const yt = ytId(b.link);
-          if (!course || !lesson) return json({ error: 'Course and lesson name are required' }, 400);
-          if (course.includes('/') || lesson.includes('/')) return json({ error: 'Course and lesson name cannot contain "/"' }, 400);
-          if (!yt) return json({ error: 'That is not a YouTube link' }, 400);
-          const parts = [course, ...folder.split('/').map((s) => s.trim()).filter(Boolean), lesson];
-          const id = parts.join('/');
-          if (hasReservedSegment(id)) return json({ error: 'RESOURCE is a reserved folder name' }, 400);
-          await env.DB.prepare('INSERT INTO youtube_lessons (id, yt, created) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET yt = excluded.yt').bind(id, yt, Date.now()).run();
+          const bulk = Array.isArray(b.lessons);
+          if (!course) return json({ error: 'Course and lesson name are required' }, 400);
+          if (course.includes('/')) return json({ error: 'Course and lesson name cannot contain "/"' }, 400);
+          const folderParts = folder.split('/').map((s) => s.trim()).filter(Boolean);
+          const parent = [course, ...folderParts].join('/');
+          if (folderParts.some(isReservedDir)) return json({ error: 'RESOURCE is a reserved folder name' }, 400);
+          const list = bulk ? b.lessons : [b];
+          const now = Date.now();
+          const rows = [];
+          const errors = [];
+          list.forEach((item, i) => {
+            const at = `row ${i + 1}: `;
+            const lesson = String(item?.lesson || '').trim();
+            const yt = ytId(item?.link);
+            const id = [parent, lesson].join('/');
+            if (!lesson) errors.push(at + 'no lesson name');
+            else if (lesson.includes('/')) errors.push(at + 'lesson name contains "/"');
+            else if (hasReservedSegment(id)) errors.push(at + 'RESOURCE is a reserved folder name');
+            else if (!yt) errors.push(at + 'not a YouTube link');
+            else rows.push({ id, yt, lesson });
+          });
+          if (errors.length) return json({ error: errors.slice(0, 3).join('; ') }, 400);
+          if (!rows.length) return json({ error: 'Course and lesson name are required' }, 400);
+          // Which ids are new decides what gets appended to the folder's order: an
+          // existing lesson keeps its place when the same file is imported again.
+          const existing = new Set();
+          for (let i = 0; i < rows.length; i += 50) {
+            const chunk = rows.slice(i, i + 50);
+            const found = await env.DB.prepare(`SELECT id FROM youtube_lessons WHERE id IN (${chunk.map(() => '?').join(',')})`)
+              .bind(...chunk.map((r) => r.id)).all();
+            for (const r of found.results || []) existing.add(String(r.id));
+          }
+          await env.DB.batch(rows.map((r) => env.DB.prepare(
+            'INSERT INTO youtube_lessons (id, yt, created) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET yt = excluded.yt',
+          ).bind(r.id, r.yt, now)));
+          const fresh = rows.filter((r) => !existing.has(r.id)).map((r) => r.id);
+          if (b.order === true && fresh.length) await appendToFolderOrder(env, parent, fresh);
           invalidateCourse();
-          const shadowed = !!(await env.RESOURCES.head(id));
-          return json({ ok: true, id, yt, shadowed });
+          const shadowed = [];
+          for (let i = 0; i < rows.length; i += 20) {
+            const chunk = rows.slice(i, i + 20);
+            const heads = await Promise.all(chunk.map((r) => env.RESOURCES.head(r.id)));
+            heads.forEach((head, j) => { if (head) shadowed.push(chunk[j].lesson); });
+          }
+          if (bulk) return json({ ok: true, added: rows.length, order: b.order === true && fresh.length > 0, shadowed });
+          return json({ ok: true, id: rows[0].id, yt: rows[0].yt, shadowed: shadowed.length > 0 });
         }
         if (path === '/api/admin/youtube' && m === 'DELETE') {
           const b = await req.json();

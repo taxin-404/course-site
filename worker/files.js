@@ -260,6 +260,28 @@ async function setEntryPosition(env, rawPath, rawPosition, hooks) {
   });
 }
 
+/**
+ * Appends newly imported lessons to the end of their folder's saved order.
+ *
+ * One read of the folder and one write of every position: this replaces N calls to
+ * setEntryPosition, each of which re-lists the bucket. `paths` is the order the caller
+ * wants for the new entries; everything already in the folder keeps its place, so a
+ * blocked import never rearranges what the admin arranged by hand.
+ */
+export async function appendToFolderOrder(env, parent, paths) {
+  const entries = await siblings(env, parent);
+  const saved = await orderPositions(env);
+  const byPath = new Map(entries.map((e) => [e.path, e]));
+  const wanted = new Set(paths);
+  const rest = entries.slice().sort(compareEntries(saved)).filter((e) => !wanted.has(e.path));
+  const tail = paths.map((p) => byPath.get(p)).filter(Boolean);
+  const final = [...rest, ...tail];
+  await runChunks(env, final.map((e, i) => env.DB.prepare(
+    'INSERT INTO content_order (path, position) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET position = excluded.position',
+  ).bind(e.path, i + 1)));
+  return Object.fromEntries(final.map((e, i) => [e.path, i + 1]));
+}
+
 /** Keeps saved positions attached to entries when a file or folder is renamed/moved. */
 async function orderMoveStatements(env, from, to, single) {
   const rows = (await env.DB.prepare('SELECT path, position FROM content_order').all()).results || [];
