@@ -217,6 +217,10 @@ app-notes-controls{display:flex;flex:none;min-width:0}
 .done-btn svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 .done-btn.is-done{color:var(--success);background:transparent}
 .done-btn.is-done:hover:not(:disabled){background:color-mix(in srgb,var(--danger) 10%,transparent);color:var(--danger)}
+.bookmark-btn{flex:none;min-height:32px;padding:0 .8rem;font-weight:500;white-space:nowrap;border-radius:var(--r-ctl);color:var(--muted)}
+.bookmark-btn svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.bookmark-btn.is-on{color:var(--primary);background:transparent}
+.bookmark-btn.is-on svg{fill:currentColor}
 .player-body{flex:1;min-height:0;overflow-y:auto;padding:1rem clamp(.75rem,2vw,1.5rem);display:flex;flex-direction:column;gap:.8rem}
 .vw{position:relative;background:#000;border-radius:var(--r-surface);overflow:hidden;--media-accent-color:var(--primary);--media-border-radius:var(--r-surface);--media-font-family:inherit;max-width:calc((100vh - var(--head) - 6.25rem) * 16 / 9);margin-inline:auto;width:100%}
 .vw video-player,.vw video-skin{display:block;width:100%}
@@ -569,6 +573,8 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   .player-bar .back-btn .lbl{display:none}
   .player-bar .done-btn .lbl{display:none}
   .player-bar .done-btn{flex:0 0 auto;width:40px;min-height:40px;padding:0;justify-content:center}
+  .player-bar .bookmark-btn .lbl{display:none}
+  .player-bar .bookmark-btn{flex:0 0 auto;width:40px;min-height:40px;padding:0;justify-content:center}
   .player-body{padding:.6rem .6rem 1rem;gap:.6rem;overflow:visible}
   .vw{border-radius:0;--media-border-radius:0;max-width:none}
   .notes-btn{width:40px;height:40px;min-height:40px;justify-content:center;padding:0!important}

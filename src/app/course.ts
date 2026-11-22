@@ -100,6 +100,14 @@ type View = CourseView;
                 <app-notes-controls [viewer]="pv" />
               }
 
+              <button type="button" class="bookmark-btn" [class.is-on]="l.bookmarked"
+                [attr.aria-pressed]="l.bookmarked"
+                [attr.aria-label]="l.bookmarked ? 'Remove bookmark' : 'Bookmark lesson'"
+                [title]="l.bookmarked ? 'Remove bookmark' : 'Bookmark lesson'" (click)="bookmark(l)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4.5L6 21z" /></svg>
+                <span class="lbl">{{ l.bookmarked ? 'Bookmarked' : 'Bookmark' }}</span>
+              </button>
+
               <button class="done-btn" [class.p]="!l.done" [class.is-done]="l.done" [attr.aria-pressed]="l.done"
                 [attr.aria-label]="l.done ? 'Completed' : 'Mark as complete'"
                 [title]="l.done ? 'Completed' : 'Mark as complete'" (click)="toggle(l)">
@@ -361,4 +369,5 @@ export class Course {
   }
   protected toggle(l: Lesson): void { void this.api.setDone(l.id, !l.done); }
   protected finish(l: Lesson): void { if (!l.done) this.toggle(l); }
+  protected bookmark(l: Lesson): void { void this.api.setBookmark(l.id, !l.bookmarked); }
 }

@@ -2,7 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import { fetchWithRetry } from './api-retry';
 
 export interface Subtitle { key: string; lang: string }
-export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'txt' | 'md' | 'youtube'; done: boolean; subtitles?: Subtitle[] }
+export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'txt' | 'md' | 'youtube'; done: boolean; bookmarked: boolean; bookmarkedAt?: number; subtitles?: Subtitle[] }
 export interface Section { title: string | null; lessons: Lesson[] }
 export interface CourseData { title: string; description: string; banner?: string; locked?: boolean; lessonCount?: number; sections: Section[] }
 export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number; courses: string[] }
@@ -201,6 +201,28 @@ export class Api {
       await this.req('progress', { lesson: id, done });
     } catch (e) {
       apply(!done); // roll back if the server rejected it
+      throw e;
+    }
+  }
+
+  async setBookmark(id: string, bookmarked: boolean): Promise<void> {
+    const before = this.courses()
+      .flatMap((c) => c.sections)
+      .flatMap((s) => s.lessons)
+      .find((l) => l.id === id);
+    const at = bookmarked ? Date.now() : undefined;
+    const apply = (value: boolean, when: number | undefined) => this.courses.update((courses) => courses.map((c) => ({
+      ...c,
+      sections: c.sections.map((s) => ({
+        ...s,
+        lessons: s.lessons.map((l) => (l.id === id ? { ...l, bookmarked: value, bookmarkedAt: when } : l)),
+      })),
+    })));
+    apply(bookmarked, at); // optimistic: update the UI first
+    try {
+      await this.req('bookmarks', { lesson: id, bookmarked });
+    } catch (e) {
+      apply(before?.bookmarked ?? !bookmarked, before?.bookmarkedAt); // roll back
       throw e;
     }
   }
