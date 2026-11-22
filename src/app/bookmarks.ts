@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { Api } from './api';
+import { BackButton } from './back-button';
 import { bookmarkRows, type BookmarkRow } from './bookmark-rows';
 import { lessonUrl } from './course-route';
 
@@ -8,10 +9,12 @@ import { lessonUrl } from './course-route';
 @Component({
   selector: 'app-bookmarks',
   changeDetection: ChangeDetectionStrategy.Eager,
+  imports: [BackButton],
   template: `
     <main data-scroll-top>
       <div class="list">
         <nav class="breadcrumb" aria-label="Location">
+          <app-back-button />
           <button class="bc-btn" (click)="home()">Courses</button>
           <span class="bc-sep">/</span>
           <span>Bookmarks</span>

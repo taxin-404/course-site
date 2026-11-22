@@ -29,6 +29,7 @@ type View = CourseView;
           <!-- Breadcrumb (browser mode only) -->
           @if (v.kind === 'browser') {
             <nav class="breadcrumb" aria-label="Location">
+              <app-back-button />
               <button class="bc-btn" (click)="home()">Courses</button>
               <span class="bc-sep">/</span>
               <button class="bc-btn" (click)="goToBreadcrumb(-1)">{{ v.course }}</button>

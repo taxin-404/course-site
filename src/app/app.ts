@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterRenderEffect, computed, inject, signal, viewChild } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { Api, CourseData } from './api';
-import { BackButton } from './back-button';
 import { Login } from './login';
 import { LessonSearch } from './lesson-search';
 import { Shell } from './shell';
@@ -19,7 +18,7 @@ interface LessonHit {
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [BackButton, Login, OptionsMenu, RouterOutlet],
+  imports: [Login, OptionsMenu, RouterOutlet],
   host: {
     '[class.no-head]': '!shell.headerVisible()',
     '(document:click)': 'onDocClick($event)',
@@ -29,7 +28,6 @@ interface LessonHit {
       <!-- The header exists only on the course list and folder browser. -->
       @if (shell.headerVisible()) {
         <header [class.searching]="search.expanded()">
-          <app-back-button />
           <h2 class="wordmark"><span>Course</span><span>Site.</span></h2>
 
           <div class="head-search">
