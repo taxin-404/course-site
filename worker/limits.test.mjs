@@ -19,9 +19,18 @@ test('hourBucket groups by the hour and rolls over at the boundary', () => {
 
 test('publicLesson never exposes the YouTube id but keeps what a student needs', () => {
   const yt = publicLesson({ id: 'Course/Sec/Clip', title: 'Clip', kind: 'youtube', yt: 'dQw4w9WgXcQ' }, true);
-  assert.deepEqual(yt, { id: 'Course/Sec/Clip', title: 'Clip', kind: 'youtube', done: true });
+  assert.deepEqual(yt, { id: 'Course/Sec/Clip', title: 'Clip', kind: 'youtube', done: true, bookmarked: false });
   assert.ok(!('yt' in yt));
 
   const hls = publicLesson({ id: 'Course/Sec/V', title: 'V', kind: 'video', subtitles: [{ key: 'k', lang: 'en' }] }, false);
-  assert.deepEqual(hls, { id: 'Course/Sec/V', title: 'V', kind: 'video', done: false, subtitles: [{ key: 'k', lang: 'en' }] });
+  assert.deepEqual(hls, {
+    id: 'Course/Sec/V', title: 'V', kind: 'video', done: false, bookmarked: false,
+    subtitles: [{ key: 'k', lang: 'en' }],
+  });
+
+  const saved = publicLesson({ id: 'Course/Sec/V', title: 'V', kind: 'video' }, false, 1730000000000);
+  assert.deepEqual(saved, {
+    id: 'Course/Sec/V', title: 'V', kind: 'video', done: false,
+    bookmarked: true, bookmarkedAt: 1730000000000,
+  });
 });

@@ -1143,7 +1143,12 @@ const handle = async (req, env, state = {}) => {
         return json({ ok: true }, 200, { 'set-cookie': clearCookie(secure) });
       }
       if (path === '/api/course') {
-        const w = new Set((await env.DB.prepare('SELECT lesson FROM watched WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.lesson));
+        const [watchedRows, bookmarkRows] = await env.DB.batch([
+          env.DB.prepare('SELECT lesson FROM watched WHERE user_id = ?').bind(u.id),
+          env.DB.prepare('SELECT lesson, created FROM bookmarks WHERE user_id = ?').bind(u.id),
+        ]);
+        const w = new Set(watchedRows.results.map((r) => r.lesson));
+        const bookmarks = new Map(bookmarkRows.results.map((r) => [r.lesson, Number(r.created)]));
         const mine = await myCourses(env, u);
         // A catalog: every course is listed. An ungranted one is `locked` and its
         // sections are withheld here, so a locked course can never leak its lessons.
@@ -1161,7 +1166,7 @@ const handle = async (req, env, state = {}) => {
               title: s.title,
               // publicLesson() drops the YouTube id: ids are fetched one at a time from
               // /api/lesson/<id>/yt, so the whole-course response cannot be scraped for them.
-              lessons: s.lessons.map((l) => publicLesson(l, w.has(l.id))),
+              lessons: s.lessons.map((l) => publicLesson(l, w.has(l.id), bookmarks.get(l.id))),
             })),
           };
         }));

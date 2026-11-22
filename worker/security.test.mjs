@@ -479,6 +479,31 @@ test('/api/progress only accepts a real lesson in a course the student has', asy
   assert.equal((await send('Course/notes.pdf')).status, 200, 'known lesson in an enrolled course');
 });
 
+test('/api/course reports only the signed-in student’s bookmarks', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+
+  raw.prepare('INSERT INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)').run(uid, 'Course/notes.pdf', 111);
+  raw.prepare('INSERT INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)').run(uid, 'Other/hidden.pdf', 222);
+  raw.prepare('INSERT INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)').run(uid, 'Course/gone.pdf', 333);
+
+  const courses = await (await call('/api/course', { headers: { cookie } })).json();
+  const lessons = courses.flatMap((c) => c.sections.flatMap((s) => s.lessons));
+  const notes = lessons.find((l) => l.id === 'Course/notes.pdf');
+  assert.equal(notes.bookmarked, true);
+  assert.equal(notes.bookmarkedAt, 111);
+  assert.equal(lessons.find((l) => l.id === 'Course/clip.mp4').bookmarked, false);
+  assert.ok(!lessons.some((l) => l.id === 'Other/hidden.pdf'), 'locked course lessons stay withheld');
+  assert.ok(!lessons.some((l) => l.id === 'Course/gone.pdf'), 'a stale row is not resurrected');
+
+  await enroll(email, 'Other');
+  const restored = await (await call('/api/course', { headers: { cookie } })).json();
+  const hidden = restored.flatMap((c) => c.sections.flatMap((s) => s.lessons)).find((l) => l.id === 'Other/hidden.pdf');
+  assert.equal(hidden.bookmarked, true, 'the row survived the lock and is visible again');
+});
+
 test('a course banner is served to any signed-in user, and SVG cannot run script', async () => {
   const email = await addUser(); // deliberately not enrolled in Other
   const { cookie } = await login(email);

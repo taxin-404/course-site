@@ -33,8 +33,9 @@ export const pace = (tokens, { rate, burst, bytes, elapsedMs }) => {
  * ids are fetched one at a time from `/api/lesson/<id>/yt`, so a single `/api/course`
  * response cannot be scraped for every YouTube id at once. `subtitles` is kept for HLS.
  */
-export const publicLesson = (lesson, done) => {
-  const out = { id: lesson.id, title: lesson.title, kind: lesson.kind, done: !!done };
+export const publicLesson = (lesson, done, bookmarkedAt) => {
+  const out = { id: lesson.id, title: lesson.title, kind: lesson.kind, done: !!done, bookmarked: !!bookmarkedAt };
+  if (bookmarkedAt) out.bookmarkedAt = bookmarkedAt;
   if (lesson.subtitles) out.subtitles = lesson.subtitles;
   return out;
 };
