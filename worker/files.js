@@ -274,7 +274,9 @@ export async function appendToFolderOrder(env, parent, paths) {
   const byPath = new Map(entries.map((e) => [e.path, e]));
   const wanted = new Set(paths);
   const rest = entries.slice().sort(compareEntries(saved)).filter((e) => !wanted.has(e.path));
-  const tail = paths.map((p) => byPath.get(p)).filter(Boolean);
+  // rank 2 is a YouTube lesson. A file or folder with the same path wins the listing,
+  // so it is never appended here — that would move the file the admin positioned.
+  const tail = paths.map((p) => byPath.get(p)).filter((e) => e && e.rank === 2);
   const final = [...rest, ...tail];
   await runChunks(env, final.map((e, i) => env.DB.prepare(
     'INSERT INTO content_order (path, position) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET position = excluded.position',

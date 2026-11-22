@@ -1609,29 +1609,39 @@ const handle = async (req, env, state = {}) => {
           });
           if (errors.length) return json({ error: errors.slice(0, 3).join('; ') }, 400);
           if (!rows.length) return json({ error: 'Course and lesson name are required' }, 400);
+          // A name can appear twice in one file. The last row wins, exactly as the upsert
+          // would, so it is inserted and positioned once (no duplicate path, no number gap).
+          const unique = [...new Map(rows.map((r) => [r.id, r])).values()];
+          // A real file wins over a same-named lesson, so a shadowed row must not be
+          // positioned: doing so would strip the file from its place and move it last.
+          const shadowed = [];
+          const shadowedIds = new Set();
+          for (let i = 0; i < unique.length; i += 20) {
+            const chunk = unique.slice(i, i + 20);
+            const heads = await Promise.all(chunk.map((r) => env.RESOURCES.head(r.id)));
+            heads.forEach((head, j) => {
+              if (!head) return;
+              shadowedIds.add(chunk[j].id);
+              shadowed.push(chunk[j].lesson);
+            });
+          }
           // Which ids are new decides what gets appended to the folder's order: an
           // existing lesson keeps its place when the same file is imported again.
           const existing = new Set();
-          for (let i = 0; i < rows.length; i += 50) {
-            const chunk = rows.slice(i, i + 50);
+          for (let i = 0; i < unique.length; i += 50) {
+            const chunk = unique.slice(i, i + 50);
             const found = await env.DB.prepare(`SELECT id FROM youtube_lessons WHERE id IN (${chunk.map(() => '?').join(',')})`)
               .bind(...chunk.map((r) => r.id)).all();
             for (const r of found.results || []) existing.add(String(r.id));
           }
-          await env.DB.batch(rows.map((r) => env.DB.prepare(
+          await env.DB.batch(unique.map((r) => env.DB.prepare(
             'INSERT INTO youtube_lessons (id, yt, created) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET yt = excluded.yt',
           ).bind(r.id, r.yt, now)));
-          const fresh = rows.filter((r) => !existing.has(r.id)).map((r) => r.id);
+          const fresh = unique.filter((r) => !existing.has(r.id) && !shadowedIds.has(r.id)).map((r) => r.id);
           if (b.order === true && fresh.length) await appendToFolderOrder(env, parent, fresh);
           invalidateCourse();
-          const shadowed = [];
-          for (let i = 0; i < rows.length; i += 20) {
-            const chunk = rows.slice(i, i + 20);
-            const heads = await Promise.all(chunk.map((r) => env.RESOURCES.head(r.id)));
-            heads.forEach((head, j) => { if (head) shadowed.push(chunk[j].lesson); });
-          }
-          if (bulk) return json({ ok: true, added: rows.length, order: b.order === true && fresh.length > 0, shadowed });
-          return json({ ok: true, id: rows[0].id, yt: rows[0].yt, shadowed: shadowed.length > 0 });
+          if (bulk) return json({ ok: true, added: unique.length, order: b.order === true && fresh.length > 0, shadowed });
+          return json({ ok: true, id: unique[0].id, yt: unique[0].yt, shadowed: shadowed.length > 0 });
         }
         if (path === '/api/admin/youtube' && m === 'DELETE') {
           const b = await req.json();

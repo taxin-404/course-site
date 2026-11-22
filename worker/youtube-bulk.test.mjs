@@ -32,6 +32,7 @@ before(async () => {
 
 const ids = (prefix) => raw.prepare('SELECT id FROM youtube_lessons WHERE id LIKE ? ORDER BY id').all(prefix + '/%').map((r) => r.id);
 const positions = () => raw.prepare('SELECT path, position FROM content_order ORDER BY position').all();
+const xp = (prefix) => positions().filter((r) => r.path.startsWith(prefix)).map((r) => [r.path, r.position]);
 
 test('one request adds every lesson', async () => {
   const res = await post('/api/admin/youtube', {
@@ -48,8 +49,15 @@ test('one request adds every lesson', async () => {
   assert.deepEqual(ids('Bulk1'), ['Bulk1/Section/One', 'Bulk1/Section/Two']);
 });
 
-test('numbered rows are appended after what is already in the folder', async () => {
-  raw.prepare("INSERT INTO youtube_lessons (id, yt, created) VALUES ('Order/Existing', 'cccccccccc', 1)").run();
+test('numbered rows are appended after hand-positioned entries without moving them', async () => {
+  // Saved order contradicts name order (Zeta before Alpha), and a file and a folder
+  // sit in the same folder: a block that ignored saved positions could not pass this.
+  await env.RESOURCES.put('Order/notes.txt', 'x');
+  await env.RESOURCES.put('Order/Extra/keep.txt', 'x');
+  raw.prepare("INSERT INTO youtube_lessons (id, yt, created) VALUES ('Order/Zeta', 'cccccccccc', 1)").run();
+  raw.prepare("INSERT INTO youtube_lessons (id, yt, created) VALUES ('Order/Alpha', 'dddddddddd', 1)").run();
+  raw.prepare("INSERT INTO content_order (path, position) VALUES ('Order/Zeta', 1)").run();
+  raw.prepare("INSERT INTO content_order (path, position) VALUES ('Order/Alpha', 2)").run();
   const res = await post('/api/admin/youtube', {
     course: 'Order', folder: '',
     lessons: [
@@ -60,11 +68,53 @@ test('numbered rows are appended after what is already in the folder', async () 
   });
   assert.equal(res.status, 200);
   assert.equal((await res.json()).order, true);
-  assert.deepEqual(positions().filter((r) => r.path.startsWith('Order/')).map((r) => [r.path, r.position]), [
-    ['Order/Existing', 1],
-    ['Order/Second', 2],
-    ['Order/First', 3],
+  assert.deepEqual(xp('Order/'), [
+    ['Order/Zeta', 1],
+    ['Order/Alpha', 2],
+    ['Order/Extra', 3],
+    ['Order/notes.txt', 4],
+    ['Order/Second', 5],
+    ['Order/First', 6],
   ]);
+});
+
+test('a lesson that shadows a real file does not move the file', async () => {
+  await env.RESOURCES.put('Shadow/Section/Real.txt', 'x');
+  await env.RESOURCES.put('Shadow/Section/Other.txt', 'x');
+  raw.prepare("INSERT INTO content_order (path, position) VALUES ('Shadow/Section/Real.txt', 1)").run();
+  raw.prepare("INSERT INTO content_order (path, position) VALUES ('Shadow/Section/Other.txt', 2)").run();
+  const res = await post('/api/admin/youtube', {
+    course: 'Shadow', folder: 'Section',
+    lessons: [
+      { lesson: 'Real.txt', link: 'https://youtu.be/aaaaaaaaaa' },
+      { lesson: 'Fresh', link: 'https://youtu.be/bbbbbbbbbb' },
+    ],
+    order: true,
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).shadowed, ['Real.txt']);
+  assert.deepEqual(xp('Shadow/Section/'), [
+    ['Shadow/Section/Real.txt', 1],
+    ['Shadow/Section/Other.txt', 2],
+    ['Shadow/Section/Fresh', 3],
+  ]);
+});
+
+test('a name repeated in one file is added once and leaves no gap', async () => {
+  const res = await post('/api/admin/youtube', {
+    course: 'Dupes', folder: '',
+    lessons: [
+      { lesson: 'Same', link: 'https://youtu.be/aaaaaaaaaa' },
+      { lesson: 'Same', link: 'https://youtu.be/bbbbbbbbbb' },
+      { lesson: 'Next', link: 'https://youtu.be/cccccccccc' },
+    ],
+    order: true,
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.added, 2);
+  assert.equal(raw.prepare("SELECT yt FROM youtube_lessons WHERE id = 'Dupes/Same'").get().yt, 'bbbbbbbbbb');
+  assert.deepEqual(xp('Dupes/'), [['Dupes/Same', 1], ['Dupes/Next', 2]]);
 });
 
 test('an existing name is updated in place and not moved', async () => {
