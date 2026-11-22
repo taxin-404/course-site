@@ -23,6 +23,9 @@ export interface CsvRow { name: string; link: string; yt: string; no: number | n
 export interface CsvReject { line: number; reason: string }
 export interface CsvRequest { lessons: { lesson: string; link: string }[]; ordered: boolean }
 
+/** What the dialog offers as a starting point; the BOM keeps Excel on UTF-8. */
+export const CSV_TEMPLATE = '\ufeff"no.","name","link"\n';
+
 /** The parsed file as the one request that imports it. `ordered` is only true when every
  *  row carries a number, because that is when the server should save the folder order. */
 export function csvPayload(rows: CsvRow[]): CsvRequest {

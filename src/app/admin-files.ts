@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, output, signal } from '@angular/core';
 import { Api, FileEntry, FileListing, YoutubeLesson } from './api';
-import { CsvReject, CsvRow, csvPayload, parseYoutubeCsv } from './youtube-csv';
+import { CSV_TEMPLATE, CsvReject, CsvRow, csvPayload, parseYoutubeCsv } from './youtube-csv';
 import { UploadJob, Uploader } from './upload';
 import { OptionsMenu } from './options-menu';
 
@@ -297,9 +297,13 @@ const IMAGE_FILE = /\.(jpe?g|png|webp|gif|svg)$/i;
           </label>
           @if (!ytEditing()) {
             <label class="field">
-              <span>…or import a CSV · name, link</span>
+              <span>…or import a CSV · "no.","name","link"</span>
               <input #csvPicker type="file" accept=".csv,text/csv" (change)="onCsv(csvPicker)" />
             </label>
+            <p class="adm-muted sm">
+              The no. column sets the order in this folder; leave it blank to keep the file order.
+              <button type="button" class="link" (click)="downloadTemplate()">Download template</button>
+            </p>
             @if (csvName()) {
               <p class="adm-muted sm">{{ csvRows().length }} lessons found in {{ csvName() }}@if (csvBad().length) { · {{ csvBad().length }} skipped}.</p>
               <ul class="yt-import">
@@ -740,6 +744,14 @@ export class AdminFiles implements OnDestroy {
     } catch {
       this.ytError.set('That file could not be read.');
     }
+  }
+
+  protected downloadTemplate(): void {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([CSV_TEMPLATE], { type: 'text/csv' }));
+    a.download = 'youtube-lessons.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   protected async importCsv(): Promise<void> {

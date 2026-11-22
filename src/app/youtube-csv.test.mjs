@@ -3,7 +3,7 @@
 // spreadsheet export carries a `no.` column — which column (if any) sets the lesson order.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { csvPayload, parseYoutubeCsv } from './youtube-csv.ts';
+import { CSV_TEMPLATE, csvPayload, parseYoutubeCsv } from './youtube-csv.ts';
 
 const A = 'https://youtu.be/aaaaaaaaaa';
 const B = 'https://youtu.be/bbbbbbbbbb';
@@ -60,4 +60,9 @@ test('csvPayload keeps file order when the numbers are unusable', () => {
   const { lessons, ordered } = csvPayload(parseYoutubeCsv(csv).rows);
   assert.equal(ordered, false);
   assert.deepEqual(lessons.map((l) => l.lesson), ['B', 'A']);
+});
+
+test('CSV_TEMPLATE is the exact header the importer reads', () => {
+  assert.equal(CSV_TEMPLATE, '\ufeff"no.","name","link"\n');
+  assert.deepEqual(parseYoutubeCsv(CSV_TEMPLATE).rows, []);
 });
