@@ -31,6 +31,7 @@ const isAdmin = async (): Promise<boolean> => {
 export const routes: Routes = [
   { path: '', pathMatch: 'full', loadComponent: () => import('./course').then((m) => m.Course) },
   { matcher: courseMatcher, loadComponent: () => import('./course').then((m) => m.Course) },
+  { path: 'bookmarks', loadComponent: () => import('./bookmarks').then((m) => m.Bookmarks) },
   { path: 'admin', loadComponent: () => import('./admin').then((m) => m.Admin), canMatch: [isAdmin] },
   { path: '**', redirectTo: '' },
 ];

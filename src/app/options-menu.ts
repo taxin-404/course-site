@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
+import { Router } from '@angular/router';
 import { Api } from './api';
 import { Shell } from './shell';
 import { Theme } from './theme';
@@ -28,6 +29,10 @@ import { Theme } from './theme';
 
     @if (open()) {
       <div class="menu" role="menu" aria-label="Options">
+        <button type="button" role="menuitem" (click)="openBookmarks()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4.5L6 21z" /></svg>
+          Bookmarks
+        </button>
         @if (isAdmin()) {
           <button type="button" role="menuitem" (click)="toggleAdmin()">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z" /></svg>
@@ -60,6 +65,7 @@ export class OptionsMenu {
   protected readonly shell = inject(Shell);
   protected readonly theme = inject(Theme);
   private readonly api = inject(Api);
+  private readonly router = inject(Router);
   private readonly btn = viewChild<ElementRef<HTMLButtonElement>>('btn');
 
   protected readonly open = signal(false);
@@ -73,6 +79,11 @@ export class OptionsMenu {
     if (!this.open()) return;
     this.open.set(false);
     this.btn()?.nativeElement.focus();
+  }
+
+  protected openBookmarks(): void {
+    this.open.set(false);
+    void this.router.navigateByUrl('/bookmarks');
   }
 
   protected toggleAdmin(): void {
