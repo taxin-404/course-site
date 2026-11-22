@@ -31,7 +31,7 @@ import { lessonUrl } from './course-route';
             </button>
             <button type="button" class="icon-btn bm-remove"
               [attr.aria-label]="'Remove bookmark: ' + b.title" title="Remove bookmark" (click)="remove(b)">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6" /></svg>
             </button>
           </div>
         } @empty {
