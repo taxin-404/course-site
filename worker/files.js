@@ -294,6 +294,9 @@ async function youtubeMoveStatements(env, from, to) {
     return [
       env.DB.prepare('INSERT OR REPLACE INTO youtube_lessons (id, yt, created) VALUES (?, ?, ?)')
         .bind(next, row.yt, row.created),
+      // A YouTube lesson has no R2 object, so the file pairs above never reach it. Its
+      // comments, notes, progress, bookmarks and resources follow the key just the same.
+      ...LESSON_ROWS.map((sql) => env.DB.prepare(sql).bind(next, id)),
       env.DB.prepare('DELETE FROM youtube_lessons WHERE id = ?').bind(id),
     ];
   });

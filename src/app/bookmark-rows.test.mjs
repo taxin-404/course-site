@@ -32,6 +32,9 @@ test('bookmarkRows gives equal timestamps a stable course/section/title order', 
   assert.deepEqual(rows.map((r) => r.lesson), ['A/S/a', 'A/S/b', 'B/S/b']);
 });
 
-test('bookmarkRows shows nothing from a locked course payload', () => {
-  assert.deepEqual(bookmarkRows([{ title: 'Locked', description: '', locked: true, sections: [] }]), []);
+test('bookmarkRows shows nothing from a locked course, even if a payload carries lessons', () => {
+  assert.deepEqual(bookmarkRows([{
+    title: 'Locked', description: '', locked: true,
+    sections: [{ title: 'S', lessons: [lesson('Locked/S/hidden', 'Hidden', true, 10)] }],
+  }]), []);
 });

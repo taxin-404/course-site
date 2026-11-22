@@ -24,10 +24,12 @@ course-site/
       api.ts             API client and app state (signals)
       app.ts             Shell: slim header (wordmark, search, options menu) + course/admin views
       shell.ts           Shared shell state (admin/lesson open, header visibility, sign out)
-      options-menu.ts    The single hamburger menu (Admin panel / Back, theme switch, Sign out)
+      options-menu.ts    The single hamburger menu (Bookmarks / Admin panel / Back, theme switch, Sign out)
       theme.ts           Two-way light/dark switch (localStorage + pre-paint script)
       login.ts           Sign-in form + Google button
-      course.ts          Course list (cards), folder browser, lesson view + bar, Mark as complete
+      course.ts          Course list (cards), folder browser, lesson view + bar, Mark as complete, bookmark toggle
+      bookmarks.ts       Private Bookmarks page: bookmarked lessons the user can still see, newest first
+      bookmark-rows.ts   Pure row builder for the Bookmarks page (no Angular imports)
       player.ts          Video player with moving email watermark
       yt-player.ts       YouTube lesson: iframe player with the same moving email watermark
       pdf-viewer.ts      PDF reader with private notes, hide/reset and full-window mode (download and print stay off)
@@ -57,8 +59,9 @@ Bucket name: `<bucket-name>` (the spelling is in `wrangler.toml`; keep it unless
 - Files = **lessons**. Video: `.mp4 .webm .mkv .mov .avi .m4v .m3u8`. Documents: `.pdf`. HLS segments (`.ts`) are hidden from the list.
 - For an HLS lesson, the title is its parent folder name (`<Lesson>/index.m3u8`).
 - Names sort naturally, so prefix with `01`, `02`. New uploads appear within about a minute (the listing is cached 60 s per Worker instance).
-- Progress, comments, notes and resources are stored by object key. Rename or move through **Admin panel → Files** and they follow; renaming with rclone or the dashboard does not.
+- Progress, comments, notes, resources and bookmarks are stored by object key. Rename or move through **Admin panel → Files** and they follow; renaming with rclone or the dashboard does not.
 - **YouTube lessons** are added on top of the bucket listing and managed from **Admin panel → Files** (below), so a lesson can exist without a file in R2.
+- **Bookmarks** are private to each student. The bookmark button in the lesson bar saves the whole lesson, and **Bookmarks** in the header menu lists everything saved, newest first.
 
 ## Accounts and the Admin panel
 
@@ -240,10 +243,11 @@ About $0.015/GB-month on R2 with free egress (60 GB is roughly $0.75-$1/month). 
 | `GET /api/config` | public | `{googleClientId}` (empty when not configured) |
 | `POST /api/login/google` | public | `{credential}` Google ID token; invite-only |
 | `GET /api/me` | signed in | Current user (`id, email, is_admin`) |
-| `GET /api/course` | signed in | `[{title, sections:[{title, lessons:[{id,title,kind,done}]}]}]` from the bucket plus YouTube lessons (`kind` is `video`, `pdf` or `youtube`; `youtube` also has `yt`, the video id); sorted by the admin's saved order |
+| `GET /api/course` | signed in | `[{title, sections:[{title, lessons:[{id,title,kind,done,bookmarked,bookmarkedAt?}]}]}]` from the bucket plus YouTube lessons (`kind` is `video`, `pdf` or `youtube`; `youtube` also has `yt`, the video id); `bookmarked`/`bookmarkedAt` are the caller's own rows; sorted by the admin's saved order |
 | `GET /api/order` | signed in | `{path: position}` for the courses this user can see; the student browser uses it for its number labels |
 | `GET /api/media/<key>` | signed in | Playlist, segment, video or PDF (range requests supported) |
 | `POST /api/progress` | signed in | `{lesson, done}` |
+| `POST /api/bookmarks` | signed in | `{lesson, bookmarked}`; private to the caller, `404` unknown lesson, `403` course not granted |
 | `GET/PUT/DELETE /api/notes/<url-encoded pdf key>` | signed in | The student's own notes for one PDF (`PUT {data: []}`); `403` for a course they do not have |
 | `GET /api/admin/courses` | admin | Course names found in the bucket |
 | `GET /api/admin/youtube` | admin | `[{id, course, folder, lesson, yt}]` — the YouTube lessons |

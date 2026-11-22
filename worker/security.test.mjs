@@ -540,10 +540,16 @@ test('/api/bookmarks toggles one private row and only accepts accessible lessons
   await send('Course/notes.pdf', true, cookie2);
   const uid2 = raw.prepare('SELECT id FROM users WHERE email = ?').get(email2).id;
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid2, 'Course/notes.pdf').n, 1);
+  const flag = async (c) => (await (await call('/api/course', { headers: { cookie: c } })).json())
+    .flatMap((x) => x.sections.flatMap((s) => s.lessons)).find((l) => l.id === 'Course/notes.pdf').bookmarked;
+  assert.equal(await flag(cookie), true, 'user 1 sees their own bookmark');
+  assert.equal(await flag(cookie2), true, 'user 2 sees their own bookmark');
 
   await send('Course/notes.pdf', false, cookie2);
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid2, 'Course/notes.pdf').n, 0, 'user 2 removed only their own row');
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid, 'Course/notes.pdf').n, 1, 'user 1 is untouched');
+  assert.equal(await flag(cookie2), false, 'user 2 no longer sees a bookmark');
+  assert.equal(await flag(cookie), true, 'user 1 still sees theirs');
 
   await send('Course/notes.pdf', false);
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?').get(uid, 'Course/notes.pdf').n, 0);
@@ -760,4 +766,32 @@ test('deleting a lesson removes the note images attached to it', async () => {
   assert.equal(env.RESOURCES.has(`_notes/${uid}/${id}`), false);
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM note_assets WHERE lesson = ?').get('Course/deleteme.pdf').n, 0);
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE lesson = ?').get('Course/deleteme.pdf').n, 0, 'the bookmark is gone');
+});
+
+test('deleting a course removes its students’ bookmarks, even on a retry', async () => {
+  const email = await addUser();
+  await enroll(email, 'TempCourse');
+  const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+  const admin = await addUser({ admin: true });
+  const { cookie: ca } = await login(admin, { ip: '10.9.9.6' });
+
+  // A real object makes TempCourse a real course; the folder delete is the path in question.
+  await env.RESOURCES.put('TempCourse/lesson.pdf', '%PDF-1.4\nTemp');
+  raw.prepare('INSERT OR REPLACE INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)').run(uid, 'TempCourse/lesson.pdf', 1);
+  let res = await call('/api/admin/files/delete', {
+    method: 'POST', headers: { ...browser(ca), 'content-type': 'application/json' }, body: JSON.stringify({ path: 'TempCourse' }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE lesson = ?').get('TempCourse/lesson.pdf').n, 0, 'course delete removes the bookmark');
+
+  // A failed first attempt can leave the object gone while the row remains. The retry must
+  // still find the key through the lesson tables instead of 404-ing and orphaning the row.
+  await env.RESOURCES.put('RetryCourse/lesson.pdf', '%PDF-1.4\nRetry');
+  raw.prepare('INSERT OR REPLACE INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)').run(uid, 'RetryCourse/lesson.pdf', 2);
+  await env.RESOURCES.delete('RetryCourse/lesson.pdf');
+  res = await call('/api/admin/files/delete', {
+    method: 'POST', headers: { ...browser(ca), 'content-type': 'application/json' }, body: JSON.stringify({ path: 'RetryCourse' }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE lesson = ?').get('RetryCourse/lesson.pdf').n, 0, 'the retry cleans the orphaned bookmark');
 });
