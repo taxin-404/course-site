@@ -731,11 +731,13 @@ test('deleting a user removes their note images from R2', async () => {
   const id = assetId(31);
   assert.equal((await uploadAsset(cookie, 'Course/notes.pdf', id, new Uint8Array([1]))).status, 200);
   const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+  raw.prepare('INSERT OR REPLACE INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)').run(uid, 'Course/notes.pdf', 1);
   assert.equal(env.RESOURCES.has(`_notes/${uid}/${id}`), true);
 
   const del = await call('/api/admin/users/' + uid, { method: 'DELETE', headers: { cookie: ca, origin: ORIGIN } });
   assert.equal(del.status, 200);
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM note_assets WHERE user_id = ?').get(uid).n, 0);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ?').get(uid).n, 0);
   assert.equal(env.RESOURCES.has(`_notes/${uid}/${id}`), false);
 });
 
@@ -748,6 +750,7 @@ test('deleting a lesson removes the note images attached to it', async () => {
   const id = assetId(41);
   assert.equal((await uploadAsset(cookie, 'Course/deleteme.pdf', id, new Uint8Array([1]))).status, 200);
   const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+  raw.prepare('INSERT OR REPLACE INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)').run(uid, 'Course/deleteme.pdf', 1);
   assert.equal(env.RESOURCES.has(`_notes/${uid}/${id}`), true);
 
   const res = await call('/api/admin/files/delete', {
@@ -756,4 +759,5 @@ test('deleting a lesson removes the note images attached to it', async () => {
   assert.equal(res.status, 200);
   assert.equal(env.RESOURCES.has(`_notes/${uid}/${id}`), false);
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM note_assets WHERE lesson = ?').get('Course/deleteme.pdf').n, 0);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM bookmarks WHERE lesson = ?').get('Course/deleteme.pdf').n, 0, 'the bookmark is gone');
 });

@@ -1601,6 +1601,7 @@ const handle = async (req, env, state = {}) => {
             await env.DB.prepare('DELETE FROM pdf_notes WHERE lesson = ?').bind(row.file_key).run();
           }
           await env.DB.prepare('DELETE FROM resources WHERE lesson = ?').bind(id).run();
+          await env.DB.prepare('DELETE FROM bookmarks WHERE lesson = ?').bind(id).run();
           await env.DB.prepare('DELETE FROM youtube_lessons WHERE id = ?').bind(id).run();
           await env.DB.prepare('DELETE FROM content_order WHERE path = ?').bind(id).run();
           invalidateCourse();
@@ -1711,6 +1712,7 @@ const handle = async (req, env, state = {}) => {
               env.DB.prepare('DELETE FROM watched WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM note_assets WHERE user_id = ?').bind(id),
+              env.DB.prepare('DELETE FROM bookmarks WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM video_notes WHERE user_id = ?').bind(id),
               // Their top-level comments take other students' replies with them, the same
               // way deleting a comment does, so no invisible orphan replies are left behind.

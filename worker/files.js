@@ -311,6 +311,7 @@ export const LESSON_ROWS = [
   'UPDATE OR REPLACE pdf_notes SET lesson = ? WHERE lesson = ?',
   'UPDATE OR REPLACE note_assets SET lesson = ? WHERE lesson = ?',
   'UPDATE OR REPLACE watched SET lesson = ? WHERE lesson = ?',
+  'UPDATE OR REPLACE bookmarks SET lesson = ? WHERE lesson = ?',
   'UPDATE resources SET lesson = ? WHERE lesson = ?',
   'UPDATE resources SET file_key = ? WHERE file_key = ?',
 ];
@@ -478,12 +479,13 @@ const LESSON_DELETES = [
   'DELETE FROM pdf_notes WHERE lesson = ?',
   'DELETE FROM note_assets WHERE lesson = ?',
   'DELETE FROM watched WHERE lesson = ?',
+  'DELETE FROM bookmarks WHERE lesson = ?',
   'DELETE FROM resources WHERE lesson = ?',
 ];
 
 // The rows can outlive the objects if a delete is interrupted between the two steps, so a
 // retry must find lesson keys in D1 as well as in the bucket. Table names are constants.
-const LESSON_TABLES = ['comments', 'video_notes', 'pdf_notes', 'note_assets', 'watched', 'resources'];
+const LESSON_TABLES = ['comments', 'video_notes', 'pdf_notes', 'note_assets', 'watched', 'bookmarks', 'resources'];
 
 async function lessonKeysUnder(env, p, single) {
   if (single) return isLessonKey(p) ? [p] : [];

@@ -56,6 +56,7 @@ function seedLesson(id, yt = 'VID1') {
   raw.prepare('INSERT INTO note_assets (user_id, lesson, asset_id, type, created) VALUES (?, ?, ?, ?, ?)').run(uid, id, 'a1', 'image/png', 1);
   raw.prepare('INSERT INTO comments (lesson, user_id, parent_id, body, created) VALUES (?, ?, NULL, ?, ?)').run(id, uid, 'hi', 1);
   raw.prepare("INSERT INTO resources (lesson, title, url, note, created_by, created, kind, file_key) VALUES (?, ?, '', NULL, ?, ?, 'pdf', ?)").run(id, 'r', uid, 1, 'MERN Stack/Intro/res.pdf');
+  raw.prepare('INSERT OR REPLACE INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)').run(uid, id, 1);
   raw.prepare('INSERT OR REPLACE INTO content_order (path, position) VALUES (?, ?)').run(id, 7);
   return uid;
 }
@@ -73,7 +74,7 @@ test('POST /api/admin/youtube/rename moves the lesson row and all student data',
 
   assert.equal(count('SELECT COUNT(*) n FROM youtube_lessons WHERE id = ?', oldId), 0, 'old id is gone');
   assert.equal(count('SELECT COUNT(*) n FROM youtube_lessons WHERE id = ? AND yt = ?', newId, 'ABC123'), 1, 'same video under the new id');
-  for (const table of ['watched', 'pdf_notes', 'video_notes', 'note_assets', 'comments', 'resources']) {
+  for (const table of ['watched', 'pdf_notes', 'video_notes', 'note_assets', 'comments', 'resources', 'bookmarks']) {
     assert.equal(count(`SELECT COUNT(*) n FROM ${table} WHERE lesson = ?`, oldId), 0, `${table} no rows left on the old id`);
     assert.equal(count(`SELECT COUNT(*) n FROM ${table} WHERE lesson = ?`, newId), 1, `${table} moved to the new id`);
   }
@@ -134,4 +135,28 @@ test('only an admin may rename', async () => {
   assert.ok(cookie);
   const res = await post('/api/admin/youtube/rename', { id: 'MERN Stack/class_01', name: 'x' }, cookie);
   assert.equal(res.status, 403);
+});
+
+test('renaming keeps bookmark keys unique when the target already has one', async () => {
+  const oldId = 'MERN Stack/bookmark-old';
+  const newId = 'MERN Stack/bookmark-new';
+  const uid = seedLesson(oldId);
+  raw.prepare('INSERT OR REPLACE INTO bookmarks (user_id, lesson, created) VALUES (?, ?, ?)').run(uid, newId, 2);
+
+  const res = await post('/api/admin/youtube/rename', { id: oldId, name: 'bookmark-new' }, adminCookie);
+  assert.equal(res.status, 200);
+  assert.equal(count('SELECT COUNT(*) n FROM bookmarks WHERE user_id = ? AND lesson = ?', uid, newId), 1);
+  assert.equal(count('SELECT COUNT(*) n FROM bookmarks WHERE lesson = ?', oldId), 0);
+});
+
+test('deleting a YouTube lesson removes its bookmarks', async () => {
+  const id = 'MERN Stack/bookmark-delete';
+  seedLesson(id);
+  const res = await call('/api/admin/youtube', {
+    method: 'DELETE',
+    headers: { ...browser(adminCookie), 'content-type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(count('SELECT COUNT(*) n FROM bookmarks WHERE lesson = ?', id), 0);
 });
