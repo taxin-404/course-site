@@ -174,9 +174,9 @@ test('a missing version runs the full path and writes the version last', async (
   assert.equal((await DB.prepare("SELECT v FROM schema_meta WHERE k = 'schema'").first()).v, SCHEMA_VERSION);
   assert.match(t.sql.at(-1), /INSERT INTO schema_meta/, 'the version is the final statement');
   const tables = await DB.prepare(
-    "SELECT COUNT(*) c FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'resources', 'youtube_lessons', 'enrollments')",
+    "SELECT COUNT(*) c FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'resources', 'youtube_lessons', 'enrollments', 'bookmarks')",
   ).first();
-  assert.equal(tables.c, 4, 'the full schema was created');
+  assert.equal(tables.c, 5, 'the full schema was created');
 });
 
 test('a different version runs the full path again', async () => {
@@ -322,7 +322,7 @@ test('the schema hash matches the version constant', () => {
   const hash = createHash('sha256').update(JSON.stringify([...SCHEMA, ...MIGRATIONS])).digest('hex');
   assert.equal(
     hash,
-    'd18bb927e74dfad8e1c31e0f3c333cf8050dbc87b2332a683d63aed7f1cfa1bc',
+    '2e20272e514de6605a76d2d25af7f17bb861065445f545d5aa534b5c92eba2dc',
     'The schema or migration DDL changed. Bump SCHEMA_VERSION in worker/index.js, then update this hash.',
   );
 });

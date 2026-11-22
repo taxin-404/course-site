@@ -72,7 +72,7 @@ const nonceCookie = (nonce, secure) => `gn=${nonce}; HttpOnly${secure ? '; Secur
 // Bump this whenever SCHEMA or MIGRATIONS changes. The next cold start then runs the full
 // idempotent path once per database. schema.test.mjs pins a hash of both lists and fails
 // with this instruction if the DDL changed without a bump.
-export const SCHEMA_VERSION = '1';
+export const SCHEMA_VERSION = '2';
 
 export const SCHEMA = [
   // Read on every cold start; written last by initSchema. A matching version row makes the
@@ -80,6 +80,7 @@ export const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)',
   'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, sid TEXT)',
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
+  'CREATE TABLE IF NOT EXISTS bookmarks (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS pdf_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
   // Images pasted into a PDF are far too big for a D1 row (2 MB hard cap), so only the bytes
   // go to R2, under a private `_notes/<user>/<sha256>` key; this table remembers which assets
