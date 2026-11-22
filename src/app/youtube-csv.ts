@@ -12,10 +12,35 @@
  * its left (to its right, when the link is the first column). A header row is
  * optional and is detected by holding no YouTube *URL* (a bare video id can look
  * like a header word).
+ *
+ * A `no.` column (the usual spreadsheet export) sets the order: the rows come
+ * back sorted by it. It is only trusted when every data row holds a different
+ * whole number from 1 to 9999; otherwise the column is ignored and file order
+ * stands, so a hand-edited blank cell never loses or reorders a lesson.
  */
 
-export interface CsvRow { name: string; link: string; yt: string }
+export interface CsvRow { name: string; link: string; yt: string; no: number | null }
 export interface CsvReject { line: number; reason: string }
+
+/** Header words that name a row-number column (compared after `headerName`). */
+const NO_HEADERS = new Set(['no', 'nr', 'number', '#', 'order', 'position', 'pos', 'sn', 's.no', 'sr.no']);
+const headerName = (cell: string): string => cell.trim().toLowerCase().replace(/\s+/g, '').replace(/\.+$/, '');
+
+/** The whole number in one cell, if it can be a lesson position. */
+function orderAt(cells: string[], col: number): number | null {
+  const raw = (cells[col] ?? '').trim();
+  if (!/^\d{1,4}$/.test(raw)) return null;
+  const n = Number(raw);
+  return n >= 1 && n <= 9999 ? n : null;
+}
+
+/** One column's numbers, or null when any cell is not a distinct usable number. */
+function orderColumn(data: string[][], col: number): number[] | null {
+  const nums = data.map((cells) => orderAt(cells, col));
+  if (nums.some((n) => n === null)) return null;
+  const out = nums as number[];
+  return new Set(out).size === out.length ? out : null;
+}
 
 /** The URL part of a YouTube link (watch, youtu.be, /embed, /shorts, /live). */
 const YT_URL = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{6,})/;
@@ -81,13 +106,40 @@ export function parseYoutubeCsv(text: string): { rows: CsvRow[]; rejected: CsvRe
   if (!data.length) return { rows: [], rejected: [] };
 
   const width = data.reduce((n, r) => Math.max(n, r.length), 0);
+  // URL hits outrank bare-id hits: a word like "Fractions" is id-shaped, so a name
+  // column and a bare-id link column would otherwise tie and the first could win.
   let linkCol = 0;
-  let best = -1;
+  let bestUrl = -1;
+  let bestId = -1;
   for (let i = 0; i < width; i++) {
-    const hits = data.reduce((n, r) => n + (r[i] && ytId(r[i]) ? 1 : 0), 0);
-    if (hits > best) { best = hits; linkCol = i; }
+    let urls = 0;
+    let ids = 0;
+    for (const r of data) {
+      const cell = (r[i] ?? '').trim();
+      if (!ytId(cell)) continue;
+      if (isYoutubeUrl(cell)) urls++;
+      else ids++;
+    }
+    if (urls > bestUrl || (urls === bestUrl && ids > bestId)) {
+      bestUrl = urls; bestId = ids; linkCol = i;
+    }
   }
   const nameCol = linkCol > 0 ? linkCol - 1 : linkCol + 1;
+
+  // A named `no.` column wins; without a header, take the leftmost column that
+  // happens to hold 1..N. A repeated value (a year) or a non-number (a date)
+  // disqualifies the column, which is what keeps those exports in file order.
+  let numbers: number[] | null = null;
+  if (header) {
+    const at = all[0].findIndex((c) => NO_HEADERS.has(headerName(c)));
+    if (at >= 0) numbers = orderColumn(data, at);
+  } else {
+    for (let i = 0; i < width; i++) {
+      if (i === linkCol || i === nameCol) continue;
+      const found = orderColumn(data, i);
+      if (found) { numbers = found; break; }
+    }
+  }
 
   const rows: CsvRow[] = [];
   const rejected: CsvReject[] = [];
@@ -99,7 +151,8 @@ export function parseYoutubeCsv(text: string): { rows: CsvRow[]; rejected: CsvRe
     if (!name) rejected.push({ line, reason: 'no name' });
     else if (name.includes('/')) rejected.push({ line, reason: 'name contains "/"' });
     else if (!yt) rejected.push({ line, reason: 'not a YouTube link' });
-    else rows.push({ name, link, yt });
+    else rows.push({ name, link, yt, no: numbers ? numbers[idx] : null });
   });
+  if (numbers) rows.sort((a, b) => (a.no as number) - (b.no as number));
   return { rows, rejected };
 }
