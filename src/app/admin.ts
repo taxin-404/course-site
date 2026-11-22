@@ -494,14 +494,16 @@ export class Admin implements OnInit {
 
   private readonly queryParams = toSignal(this.route.queryParamMap, { initialValue: this.route.snapshot.queryParamMap });
 
-  /** Which screen this panel shows; kept in `?tab=files`, so Back returns to Users. */
+  /** Which screen this panel shows; kept in `?tab=files`. Switching tabs replaces the
+   * admin history entry, so one Back always leaves the panel instead of stepping
+   * through its tabs first. */
   protected readonly view = computed<'users' | 'files'>(() => (this.queryParams().get('tab') === 'files' ? 'files' : 'users'));
 
   protected showFiles(): void {
-    void this.router.navigate([], { relativeTo: this.route, queryParams: { tab: 'files' }, queryParamsHandling: 'merge' });
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { tab: 'files' }, queryParamsHandling: 'merge', replaceUrl: true });
   }
   protected showUsers(): void {
-    void this.router.navigate([], { relativeTo: this.route, queryParams: { tab: null }, queryParamsHandling: 'merge' });
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { tab: null }, queryParamsHandling: 'merge', replaceUrl: true });
   }
 
   protected readonly users = signal<AdminUser[]>([]);

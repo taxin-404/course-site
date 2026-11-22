@@ -4,6 +4,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map } from 'rxjs';
 import { Api } from './api';
 import { LessonSearch } from './lesson-search';
+import { NavHistory } from './nav-history';
 
 /**
  * Cross-screen shell state that used to live in the header: which top-level panel
@@ -16,6 +17,7 @@ export class Shell {
   private readonly api = inject(Api);
   private readonly search = inject(LessonSearch);
   private readonly router = inject(Router);
+  private readonly nav = inject(NavHistory);
 
   /** Where "Back to course" returns to; remembered when the admin panel opens. */
   private returnUrl = '/';
@@ -38,7 +40,9 @@ export class Shell {
   toggleAdmin(): void {
     this.search.reset();
     if (this.admin()) {
-      void this.router.navigateByUrl(this.returnUrl);
+      // The panel is one history entry (its Users/Files tabs replace the URL), so going
+      // back lands on the page that opened it instead of stacking a second copy.
+      this.nav.backTo(this.returnUrl);
       this.returnUrl = '/';
     } else {
       this.returnUrl = this.router.url || '/';

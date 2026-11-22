@@ -59,4 +59,15 @@ export class NavHistory {
   }
 
   back(): void { this.location.back(); }
+
+  /**
+   * Leave a temporary screen (the admin panel) without leaving a trail: go back when
+   * this document has an earlier entry, otherwise replace the current one with the
+   * fallback. That keeps a later Back on the fallback page from returning to the
+   * screen that was just dismissed.
+   */
+  backTo(fallback: string): void {
+    if (this.canBack()) this.location.back();
+    else void this.router.navigateByUrl(fallback, { replaceUrl: true });
+  }
 }
