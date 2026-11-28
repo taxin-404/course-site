@@ -19,6 +19,20 @@
 //   - A lesson directly in a course root is just "<Course>/<Video name>".
 //   - The value can be any usual YouTube link (watch, youtu.be, /embed, /shorts, /live)
 //     or just the video id.
+/**
+ * A video's title is its path, so two videos called "Live Class" in one folder could not
+ * both exist: the second upload overwrote the first. The duplicate now keeps the visible
+ * name and its id ends with this invisible ordinal ("Live Class" + U+200B + "2"), which
+ * every display path strips. It is never typed, only allocated on the server.
+ */
+export const DUPLICATE_MARK = '\u200B';
+
+/** The title people see: the id's last segment, without a duplicate ordinal. */
+export const lessonName = (id) => {
+  const s = String(id);
+  return s.slice(s.lastIndexOf('/') + 1).replace(/\u200B\d+$/, '');
+};
+
 export const YOUTUBE_LESSONS = {
   // "Physics/Week 1/Welcome": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
 };

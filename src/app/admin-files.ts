@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, output, signal } from '@angular/core';
 import { Api, FileEntry, FileListing, YoutubeLesson } from './api';
 import { CSV_TEMPLATE, CsvReject, CsvRow, csvPayload, parseYoutubeCsv } from './youtube-csv';
+import { lessonName } from './lesson-name';
 import { UploadJob, Uploader } from './upload';
 import { OptionsMenu } from './options-menu';
 
@@ -704,12 +705,11 @@ export class AdminFiles implements OnDestroy {
     this.busy.set(true);
     try {
       if (editing) {
-        // The name is the lesson's key, so a changed name is a data move: the server moves the
-        // row and everything attached to it. The link is then upserted on the resulting id.
-        const oldName = editing.split('/').pop() || '';
+        // Duplicates can share a visible name, so the id identifies the row: rename only
+        // when the title changed, then set the link on that exact id (never by name).
+        const oldName = lessonName(editing);
         const next = name === oldName ? editing : (await this.api.renameYoutubeLesson(editing, name)).id;
-        const parts = next.split('/');
-        await this.api.addYoutubeLesson(parts[0], parts.slice(1, -1).join('/'), parts[parts.length - 1], link);
+        await this.api.setYoutubeLink(next, link);
         this.ytOpen.set(false);
         this.toast(name === oldName ? 'Link updated' : 'Lesson renamed');
       } else {
@@ -769,9 +769,12 @@ export class AdminFiles implements OnDestroy {
       const res = await this.api.importYoutubeLessons(course, folder, lessons, ordered);
       const hidden = res.shadowed.length;
       this.closeYt();
-      this.toast(hidden
-        ? `Added ${res.added} lessons · ${hidden} hidden by a file with the same path`
-        : `Added ${res.added} lesson${res.added === 1 ? '' : 's'}`, hidden > 0);
+      const said = [
+        res.added ? `Added ${res.added} lesson${res.added === 1 ? '' : 's'}` : '',
+        res.unchanged ? `${res.unchanged} already there` : '',
+        hidden ? `${hidden} hidden by a file with the same path` : '',
+      ].filter(Boolean);
+      this.toast(said.join(' · ') || 'No changes', hidden > 0);
       void this.api.init();
       await this.load();
     } catch (e) {
@@ -781,10 +784,10 @@ export class AdminFiles implements OnDestroy {
     }
   }
 
-  protected removeYt(y: { id: string }): void {
+  protected removeYt(y: { id: string; name: string }): void {
     this.openAsk({
       title: 'Delete YouTube lesson',
-      hint: `“${this.base(y.id)}” is removed from this folder. This cannot be undone.`,
+      hint: `“${y.name}” is removed from this folder. This cannot be undone.`,
       label: '',
       confirm: 'Delete',
       danger: true,

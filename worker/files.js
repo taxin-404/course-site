@@ -6,6 +6,7 @@
 //
 // handleFiles is mounted inside the /api/admin/ guard, so every route is already admin-only.
 import { presign, r2Config, s3Fetch } from './s3.js';
+import { lessonName } from './youtube.js';
 
 const KEY_MAX = 500;
 const VIDEO_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|m3u8)$/i;
@@ -134,7 +135,7 @@ async function siblings(env, parent) {
   for (const row of rows) {
     const id = String(row.id);
     if (seen.has(id) || parentOf(id) !== parent) continue;
-    out.push({ path: id, name: entryName(id), rank: 2 });
+    out.push({ path: id, name: lessonName(id), rank: 2 });
     seen.add(id);
   }
   // Sections implied by YouTube lessons (rank 0: they are folders), so setEntryPosition

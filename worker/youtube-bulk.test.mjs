@@ -100,12 +100,12 @@ test('a lesson that shadows a real file does not move the file', async () => {
   ]);
 });
 
-test('a name repeated in one file is added once and leaves no gap', async () => {
+test('a name repeated with the same link is added once and leaves no gap', async () => {
   const res = await post('/api/admin/youtube', {
     course: 'Dupes', folder: '',
     lessons: [
       { lesson: 'Same', link: 'https://youtu.be/aaaaaaaaaa' },
-      { lesson: 'Same', link: 'https://youtu.be/bbbbbbbbbb' },
+      { lesson: 'Same', link: 'https://youtu.be/aaaaaaaaaa' },
       { lesson: 'Next', link: 'https://youtu.be/cccccccccc' },
     ],
     order: true,
@@ -113,23 +113,26 @@ test('a name repeated in one file is added once and leaves no gap', async () => 
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.added, 2);
-  assert.equal(raw.prepare("SELECT yt FROM youtube_lessons WHERE id = 'Dupes/Same'").get().yt, 'bbbbbbbbbb');
+  assert.equal(raw.prepare("SELECT yt FROM youtube_lessons WHERE id = 'Dupes/Same'").get().yt, 'aaaaaaaaaa');
   assert.deepEqual(xp('Dupes/'), [['Dupes/Same', 1], ['Dupes/Next', 2]]);
 });
 
-test('an existing name is updated in place and not moved', async () => {
+test('an existing name and link is not added again and keeps its place', async () => {
   raw.prepare("INSERT INTO youtube_lessons (id, yt, created) VALUES ('Again/Pinned', 'dddddddddd', 1)").run();
   raw.prepare("INSERT INTO content_order (path, position) VALUES ('Again/Pinned', 1)").run();
   const res = await post('/api/admin/youtube', {
     course: 'Again', folder: '',
     lessons: [
-      { lesson: 'Pinned', link: 'https://youtu.be/zzzzzzzzzz' },
+      { lesson: 'Pinned', link: 'https://youtu.be/dddddddddd' },
       { lesson: 'New', link: 'https://youtu.be/yyyyyyyyyy' },
     ],
     order: true,
   });
   assert.equal(res.status, 200);
-  assert.equal(raw.prepare("SELECT yt FROM youtube_lessons WHERE id = 'Again/Pinned'").get().yt, 'zzzzzzzzzz');
+  const body = await res.json();
+  assert.equal(body.added, 1);
+  assert.equal(body.unchanged, 1);
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM youtube_lessons WHERE id LIKE 'Again/%'").get().n, 2);
   assert.deepEqual(positions().filter((r) => r.path.startsWith('Again/')).map((r) => [r.path, r.position]), [
     ['Again/Pinned', 1],
     ['Again/New', 2],

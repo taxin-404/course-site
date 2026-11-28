@@ -2,7 +2,7 @@ import { handleFiles, appendToFolderOrder, hasReservedSegment, isReservedDir, an
 import { BANNER_TYPES, bannerKeys } from './banners.js';
 import { lessonOf, hourBucket, publicLesson, pace } from './limits.js';
 import { sessionKey, scramble } from './yt-cipher.mjs';
-import { YOUTUBE_LESSONS } from './youtube.js';
+import { DUPLICATE_MARK, YOUTUBE_LESSONS, lessonName } from './youtube.js';
 
 const enc = new TextEncoder();
 const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -397,6 +397,22 @@ function ytId(link) {
   if (m) return m[1];
   return /^[A-Za-z0-9_-]{6,}$/.test(s) ? s : null;
 }
+/** Lessons directly inside one folder, read through the same id-prefix range the file manager uses. */
+async function youtubeInFolder(env, parent) {
+  const rows = (await env.DB.prepare('SELECT id, yt FROM youtube_lessons WHERE id >= ? AND id < ?')
+    .bind(parent + '/', parent + '0').all()).results || [];
+  return rows.map((r) => ({ id: String(r.id), yt: String(r.yt) }));
+}
+
+/** A free id for `name`; a second video with the same title gets the invisible ordinal. */
+function youtubeIdFor(parent, name, taken) {
+  const plain = `${parent}/${name}`;
+  if (!taken.has(plain)) return plain;
+  let n = 2;
+  while (taken.has(`${plain}${DUPLICATE_MARK}${n}`)) n++;
+  return `${plain}${DUPLICATE_MARK}${n}`;
+}
+
 async function listCourse(env) {
   if (cache.data && Date.now() - cache.at < 60000) return cache.data;
   const keys = []; let cursor;
@@ -474,7 +490,7 @@ async function listCourse(env) {
     if ([...secs.values()].some((list) => list.some((l) => l.id === id))) continue; // a real file wins a clash
     const sectionName = parts.slice(1, -1).join(' / ');
     if (!secs.has(sectionName)) secs.set(sectionName, []);
-    secs.get(sectionName).push({ id, title: parts[parts.length - 1], kind: 'youtube', yt: row.yt });
+    secs.get(sectionName).push({ id, title: lessonName(id), kind: 'youtube', yt: row.yt });
   }
 
   const positions = new Map(
@@ -1577,13 +1593,27 @@ const handle = async (req, env, state = {}) => {
           const rows = (await env.DB.prepare('SELECT id, yt FROM youtube_lessons ORDER BY id').all()).results;
           return json(rows.map((r) => {
             const parts = String(r.id).split('/').filter(Boolean);
-            return { id: r.id, course: parts[0] || '', folder: parts.slice(1, -1).join(' / '), lesson: parts[parts.length - 1] || '', yt: r.yt };
+            return { id: r.id, course: parts[0] || '', folder: parts.slice(1, -1).join(' / '), lesson: lessonName(r.id), yt: r.yt };
           }));
         }
         if (path === '/api/admin/youtube' && m === 'POST') {
           // One lesson (the dialog) or a whole CSV (bulk). The bulk form is all-or-nothing:
           // a bad row refuses the batch rather than half-importing a course.
           const b = await req.json();
+
+          // Editing sends the id, so one duplicate changes its own link and leaves its
+          // twin alone (a name alone is no longer unique inside a folder).
+          if (!Array.isArray(b.lessons) && b.id) {
+            const id = String(b.id).trim();
+            const yt = ytId(b.link);
+            if (!yt) return json({ error: 'That is not a YouTube link' }, 400);
+            const row = await env.DB.prepare('SELECT id FROM youtube_lessons WHERE id = ?').bind(id).first();
+            if (!row) return json({ error: 'That lesson no longer exists' }, 404);
+            await env.DB.prepare('UPDATE youtube_lessons SET yt = ? WHERE id = ?').bind(yt, id).run();
+            invalidateCourse();
+            return json({ ok: true, id, yt, shadowed: !!(await env.RESOURCES.head(id)) });
+          }
+
           const course = String(b.course || '').trim();
           const folder = String(b.folder || '').trim();
           const bulk = Array.isArray(b.lessons);
@@ -1594,7 +1624,7 @@ const handle = async (req, env, state = {}) => {
           if (folderParts.some(isReservedDir)) return json({ error: 'RESOURCE is a reserved folder name' }, 400);
           const list = bulk ? b.lessons : [b];
           const now = Date.now();
-          const rows = [];
+          const wanted = [];
           const errors = [];
           list.forEach((item, i) => {
             const at = `row ${i + 1}: `;
@@ -1605,19 +1635,35 @@ const handle = async (req, env, state = {}) => {
             else if (lesson.includes('/')) errors.push(at + 'lesson name contains "/"');
             else if (hasReservedSegment(id)) errors.push(at + 'RESOURCE is a reserved folder name');
             else if (!yt) errors.push(at + 'not a YouTube link');
-            else rows.push({ id, yt, lesson });
+            else wanted.push({ lesson, yt });
           });
           if (errors.length) return json({ error: errors.slice(0, 3).join('; ') }, 400);
-          if (!rows.length) return json({ error: 'Course and lesson name are required' }, 400);
-          // A name can appear twice in one file. The last row wins, exactly as the upsert
-          // would, so it is inserted and positioned once (no duplicate path, no number gap).
-          const unique = [...new Map(rows.map((r) => [r.id, r])).values()];
+          if (!wanted.length) return json({ error: bulk ? 'No lessons to add' : 'Course and lesson name are required' }, 400);
+
+          // Name + link is the import identity: that pair twice (in the file, or already in
+          // the folder) is the same lesson, so re-importing a file adds nothing. A name
+          // already used with a *different* link is a second lesson with the same title.
+          const existing = await youtubeInFolder(env, parent);
+          const taken = new Set(existing.map((r) => r.id));
+          const unchanged = [];
+          const planned = [];
+          const seen = new Set();
+          for (const row of wanted) {
+            const key = `${row.lesson}\u0000${row.yt}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const same = existing.find((r) => lessonName(r.id) === row.lesson && r.yt === row.yt);
+            if (same) { unchanged.push(same); continue; }
+            const id = youtubeIdFor(parent, row.lesson, taken);
+            taken.add(id);
+            planned.push({ id, yt: row.yt, lesson: row.lesson });
+          }
           // A real file wins over a same-named lesson, so a shadowed row must not be
           // positioned: doing so would strip the file from its place and move it last.
           const shadowed = [];
           const shadowedIds = new Set();
-          for (let i = 0; i < unique.length; i += 20) {
-            const chunk = unique.slice(i, i + 20);
+          for (let i = 0; i < planned.length; i += 20) {
+            const chunk = planned.slice(i, i + 20);
             const heads = await Promise.all(chunk.map((r) => env.RESOURCES.head(r.id)));
             heads.forEach((head, j) => {
               if (!head) return;
@@ -1625,23 +1671,17 @@ const handle = async (req, env, state = {}) => {
               shadowed.push(chunk[j].lesson);
             });
           }
-          // Which ids are new decides what gets appended to the folder's order: an
-          // existing lesson keeps its place when the same file is imported again.
-          const existing = new Set();
-          for (let i = 0; i < unique.length; i += 50) {
-            const chunk = unique.slice(i, i + 50);
-            const found = await env.DB.prepare(`SELECT id FROM youtube_lessons WHERE id IN (${chunk.map(() => '?').join(',')})`)
-              .bind(...chunk.map((r) => r.id)).all();
-            for (const r of found.results || []) existing.add(String(r.id));
-          }
-          await env.DB.batch(unique.map((r) => env.DB.prepare(
+          if (planned.length) await env.DB.batch(planned.map((r) => env.DB.prepare(
             'INSERT INTO youtube_lessons (id, yt, created) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET yt = excluded.yt',
           ).bind(r.id, r.yt, now)));
-          const fresh = unique.filter((r) => !existing.has(r.id) && !shadowedIds.has(r.id)).map((r) => r.id);
+          const fresh = planned.filter((r) => !shadowedIds.has(r.id)).map((r) => r.id);
           if (b.order === true && fresh.length) await appendToFolderOrder(env, parent, fresh);
           invalidateCourse();
-          if (bulk) return json({ ok: true, added: unique.length, order: b.order === true && fresh.length > 0, shadowed });
-          return json({ ok: true, id: unique[0].id, yt: unique[0].yt, shadowed: shadowed.length > 0 });
+          if (bulk) return json({ ok: true, added: planned.length, unchanged: unchanged.length, order: b.order === true && fresh.length > 0, shadowed });
+          const one = planned[0] || unchanged[0];
+          if (!one) return json({ error: 'No lessons to add' }, 400);
+          const hidden = planned.length ? shadowedIds.has(one.id) : !!(await env.RESOURCES.head(one.id));
+          return json({ ok: true, id: one.id, yt: one.yt, shadowed: hidden });
         }
         if (path === '/api/admin/youtube' && m === 'DELETE') {
           const b = await req.json();
@@ -1674,6 +1714,10 @@ const handle = async (req, env, state = {}) => {
           const next = [...parts.slice(0, -1), name].join('/');
           const row = await env.DB.prepare('SELECT yt, created FROM youtube_lessons WHERE id = ?').bind(id).first();
           if (!row) return json({ error: 'Not found' }, 404);
+          // A duplicate's id carries an invisible ordinal; the name the admin sees is what
+          // is being compared, so saving the same title is a no-op and not a collision
+          // with the plain copy that holds that path.
+          if (lessonName(id) === name) return json({ ok: true, id });
           if (next === id) return json({ ok: true, id });
           // Refuse to land on another lesson, or on a real file: the file would shadow the
           // lesson on the site, hiding it together with all of its student data.
